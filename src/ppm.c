@@ -14,7 +14,19 @@ static void hv_set_error(char *err, size_t err_size, const char *fmt, ...)
   }
 
   va_start(args, fmt);
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+#endif
   (void)vsnprintf(err, err_size, fmt, args);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
   va_end(args);
 }
 

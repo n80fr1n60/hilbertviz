@@ -45,6 +45,14 @@ Run tests:
 ctest --test-dir build --output-on-failure
 ```
 
+Strict Clang note:
+
+- CI uses `-Wformat=2` with warnings-as-errors. Error helper wrappers that forward
+  variadic format strings to `vsnprintf` use a narrow, local
+  `-Wformat-nonliteral` diagnostic suppression around that single call.
+- This keeps global format checking strict while allowing shared `hv_set_error`
+  helpers to compile across Clang/GCC.
+
 ## Usage
 
 ```bash
