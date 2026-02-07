@@ -1,0 +1,11 @@
+/build/
+/build-coverage*/
+/build-fuzz-*/
+/fuzz/artifacts/
+/fuzz/out/
+/fuzz/work/
+/build*
+Plan.md
+Issues.md
+*.bin
+*.png

@@ -1,0 +1,64 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gcc-release-png
+            cc: gcc
+            cxx: g++
+            build_type: Release
+            with_png: ON
+            sanitizers: OFF
+          - name: clang-debug-asan-ubsan
+            cc: clang
+            cxx: clang++
+            build_type: Debug
+            with_png: ON
+            sanitizers: ON
+          - name: gcc-release-no-png
+            cc: gcc
+            cxx: g++
+            build_type: Release
+            with_png: OFF
+            sanitizers: OFF
+
+    name: ${{ matrix.name }}
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake libpng-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DHILBERTVIZ_WITH_PNG=${{ matrix.with_png }} \
+            -DHILBERTVIZ_SANITIZERS=${{ matrix.sanitizers }} \
+            -DHILBERTVIZ_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
