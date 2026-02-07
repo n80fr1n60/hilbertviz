@@ -28,7 +28,7 @@ jobs:
           sudo apt-get install -y ninja-build cmake libpng-dev
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@45cbd0c69efef2842186d3ff5294cb22c48341ef # v4.32.2
+        uses: github/codeql-action/init@b20883b0cd1f46c72ae0ba6d1090936928f9fa30  # v4.32.0
         with:
           languages: cpp
 
