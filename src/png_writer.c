@@ -97,7 +97,7 @@ int hv_write_png_stream(
   uint64_t row_bytes_u64 = 0u;
   size_t row_bytes = 0u;
   uint32_t y = 0u;
-  const char *label = (path_hint != 0) ? path_hint : "(stream)";
+  (void)path_hint;
 
   if ((fp == 0) || (pixels == 0) || (width == 0u) || (height == 0u)) {
     hv_set_error(err, err_size, "invalid arguments for png write");
@@ -129,7 +129,7 @@ int hv_write_png_stream(
   }
 
   if (setjmp(png_jmpbuf(png_ptr)) != 0) {
-    hv_set_error(err, err_size, "libpng failed while writing '%s'", label);
+    hv_set_error(err, err_size, "libpng failed while writing png stream");
     png_destroy_write_struct(&png_ptr, &info_ptr);
     return 0;
   }
