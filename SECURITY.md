@@ -6,8 +6,6 @@ We take the security of `hilbertviz` seriously. If you discover a security vulne
 
 *   **Email**: we do not yet have an email for this
 
-Please include a detailed description of the vulnerability, steps to reproduce, and a proof-of-concept if possible. We will acknowledge your report within 48 hours and provide a timeline for a fix.
-
 ## Defensive Posture
 
 `hilbertviz` is built with a "security-first" approach for C11 development. Our defensive measures include:
