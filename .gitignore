@@ -9,3 +9,4 @@ Plan.md
 Issues.md
 *.bin
 *.png
+gha-creds-*.json

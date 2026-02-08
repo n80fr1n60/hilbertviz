@@ -36,6 +36,20 @@ endif()
 add_library(hv_config INTERFACE)
 target_compile_definitions(hv_config INTERFACE _FILE_OFFSET_BITS=64 _POSIX_C_SOURCE=200809L _XOPEN_SOURCE=700)
 
+add_library(hv_hardening INTERFACE)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(hv_hardening INTERFACE
+    $<$<CONFIG:Release>:-fstack-protector-strong>
+    $<$<CONFIG:Release>:-fPIE>
+  )
+  target_compile_definitions(hv_hardening INTERFACE
+    $<$<CONFIG:Release>:_FORTIFY_SOURCE=2>
+  )
+  target_link_options(hv_hardening INTERFACE
+    $<$<CONFIG:Release>:-pie>
+  )
+endif()
+
 add_library(hv_sanitizers INTERFACE)
 if(HILBERTVIZ_SANITIZERS AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(hv_sanitizers INTERFACE -fsanitize=address,undefined -fno-omit-frame-pointer)

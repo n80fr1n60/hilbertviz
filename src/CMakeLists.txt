@@ -9,7 +9,7 @@ add_library(hvcore STATIC
 )
 
 target_include_directories(hvcore PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(hvcore PUBLIC hv_warnings hv_config hv_sanitizers hv_coverage)
+target_link_libraries(hvcore PUBLIC hv_warnings hv_config hv_hardening hv_sanitizers hv_coverage)
 if(PNG_FOUND)
   target_compile_definitions(hvcore PRIVATE HV_HAVE_LIBPNG=1)
   target_link_libraries(hvcore PUBLIC PNG::PNG)

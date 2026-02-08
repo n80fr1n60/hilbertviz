@@ -21,6 +21,12 @@
 #define HV_READ_CHUNK_BYTES 65536u
 #define HV_DEFAULT_MAX_IMAGE_BYTES (256ULL * 1024ULL * 1024ULL)
 
+#if defined(__GNUC__) || defined(__clang__)
+#define HV_PRINTF_LIKE(fmt_idx, first_arg_idx) __attribute__((format(printf, fmt_idx, first_arg_idx)))
+#else
+#define HV_PRINTF_LIKE(fmt_idx, first_arg_idx)
+#endif
+
 typedef struct HvByteStats {
   uint64_t total_bytes;
   uint64_t null_bytes;
@@ -29,7 +35,7 @@ typedef struct HvByteStats {
   uint64_t high_bytes;
 } HvByteStats;
 
-static void hv_set_error(char *err, size_t err_size, const char *fmt, ...)
+static void HV_PRINTF_LIKE(3, 4) hv_set_error(char *err, size_t err_size, const char *fmt, ...)
 {
   va_list args;
 

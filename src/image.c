@@ -8,7 +8,13 @@
 #include <stdio.h>
 #include <string.h>
 
-static void hv_set_error(char *err, size_t err_size, const char *fmt, ...)
+#if defined(__GNUC__) || defined(__clang__)
+#define HV_PRINTF_LIKE(fmt_idx, first_arg_idx) __attribute__((format(printf, fmt_idx, first_arg_idx)))
+#else
+#define HV_PRINTF_LIKE(fmt_idx, first_arg_idx)
+#endif
+
+static void HV_PRINTF_LIKE(3, 4) hv_set_error(char *err, size_t err_size, const char *fmt, ...)
 {
   va_list args;
 
