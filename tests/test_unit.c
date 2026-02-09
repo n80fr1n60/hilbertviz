@@ -2,6 +2,8 @@
 #include "hilbert.h"
 #include "image.h"
 #include "palette.h"
+#include "png_writer.h"
+#include "ppm.h"
 #include "render.h"
 
 #include <fcntl.h>
@@ -137,6 +139,59 @@ static void test_hilbert_bijection(void)
   free(visited);
 }
 
+static void test_gilbert_rect_bijection(void)
+{
+  const uint32_t width = 5u;
+  const uint32_t height = 4u;
+  const uint64_t capacity = (uint64_t)width * (uint64_t)height;
+  uint8_t *visited = 0;
+  uint64_t d = 0u;
+
+  visited = (uint8_t *)calloc((size_t)capacity, 1u);
+  TEST_CHECK(visited != 0);
+
+  for (d = 0u; d < capacity; ++d) {
+    uint32_t x = 0u;
+    uint32_t y = 0u;
+    uint64_t idx = 0u;
+
+    TEST_CHECK(hv_gilbert_d2xy(width, height, d, &x, &y));
+    TEST_CHECK(x < width);
+    TEST_CHECK(y < height);
+
+    idx = ((uint64_t)y * (uint64_t)width) + (uint64_t)x;
+    TEST_CHECK(idx < capacity);
+    TEST_CHECK(visited[(size_t)idx] == 0u);
+    visited[(size_t)idx] = 1u;
+  }
+
+  for (d = 0u; d < capacity; ++d) {
+    TEST_CHECK(visited[(size_t)d] == 1u);
+  }
+
+  {
+    uint32_t x = 0u;
+    uint32_t y = 0u;
+    TEST_CHECK(!hv_gilbert_d2xy(width, height, capacity, &x, &y));
+  }
+  free(visited);
+}
+
+static void test_gilbert_depth_limit_and_skinny_extremes(void)
+{
+  uint32_t x = 0u;
+  uint32_t y = 0u;
+  const uint32_t tall_height = UINT32_MAX;
+  const uint64_t last_index = (uint64_t)tall_height - 1u;
+
+  TEST_CHECK(!hv_gilbert_d2xy_with_limit(5u, 4u, 0u, 0u, &x, &y));
+  TEST_CHECK(hv_gilbert_d2xy_with_limit(5u, 4u, 0u, 32u, &x, &y));
+
+  TEST_CHECK(hv_gilbert_d2xy_with_limit(1u, tall_height, last_index, 0u, &x, &y));
+  TEST_CHECK(x == 0u);
+  TEST_CHECK(y == tall_height - 1u);
+}
+
 static void test_palette_edges(void)
 {
   uint8_t rgb[3];
@@ -161,6 +216,242 @@ static void test_palette_edges(void)
 
   hv_byte_to_rgb(0xFFu, rgb);
   TEST_CHECK((rgb[0] == 255u) && (rgb[1] == 0u) && (rgb[2] == 0u));
+}
+
+static void test_image_api_dispatch_and_errors(void)
+{
+  char base_template[] = "/tmp/hv_image_dispatch_XXXXXX";
+  char path_ppm[192];
+  char path_png[192];
+  char path_noext[192];
+  char path_bad[192];
+  uint8_t pixels[12] = {
+    0x00u, 0x00u, 0x00u,
+    0x11u, 0x22u, 0x33u,
+    0x44u, 0x55u, 0x66u,
+    0x77u, 0x88u, 0x99u
+  };
+  int seed_fd = -1;
+  char err[256];
+  FILE *fp = 0;
+  struct stat st;
+
+  memset(err, 0, sizeof(err));
+
+  seed_fd = mkstemp(base_template);
+  TEST_CHECK(seed_fd >= 0);
+  TEST_CHECK(close(seed_fd) == 0);
+  TEST_CHECK(unlink(base_template) == 0);
+
+  TEST_CHECK(snprintf(path_ppm, sizeof(path_ppm), "%s.ppm", base_template) > 0);
+  TEST_CHECK(snprintf(path_png, sizeof(path_png), "%s.png", base_template) > 0);
+  TEST_CHECK(snprintf(path_noext, sizeof(path_noext), "%s_noext", base_template) > 0);
+  TEST_CHECK(snprintf(path_bad, sizeof(path_bad), "%s.bad", base_template) > 0);
+
+  TEST_CHECK(!hv_write_image(0, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "missing output path") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(hv_write_image(path_ppm, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(stat(path_ppm, &st) == 0);
+  TEST_CHECK(st.st_size > 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(hv_write_image(path_noext, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(stat(path_noext, &st) == 0);
+  TEST_CHECK(st.st_size > 0);
+
+#ifdef HV_TEST_HAVE_PNG
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(hv_write_image(path_png, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(stat(path_png, &st) == 0);
+  TEST_CHECK(st.st_size > 0);
+#else
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_image(path_png, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "libpng is not available") != 0);
+#endif
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_image(path_bad, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "unsupported output extension") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_image("x.unsupported", pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "unsupported output extension") != 0);
+
+  fp = tmpfile();
+  TEST_CHECK(fp != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_image_stream(0, fp, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "missing output path") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_image_stream("dummy.ppm", 0, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "missing output stream") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_image_stream("dummy.bad", fp, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "unsupported output extension") != 0);
+
+  TEST_CHECK(fclose(fp) == 0);
+
+  TEST_CHECK(unlink(path_ppm) == 0);
+  TEST_CHECK(unlink(path_noext) == 0);
+  (void)unlink(path_png);
+  (void)unlink(path_bad);
+}
+
+static void test_ppm_writer_wrapper_and_error_paths(void)
+{
+  char base_template[] = "/tmp/hv_ppm_wrap_XXXXXX";
+  char missing_dir_template[] = "/tmp/hv_ppm_missing_XXXXXX";
+  char path_ppm[192];
+  char path_missing[192];
+  uint8_t pixels[12] = {
+    0x00u, 0x00u, 0x00u,
+    0x11u, 0x22u, 0x33u,
+    0x44u, 0x55u, 0x66u,
+    0x77u, 0x88u, 0x99u
+  };
+  int seed_fd = -1;
+  char *missing_dir = 0;
+  char err[256];
+  FILE *ro = 0;
+  struct stat st;
+
+  memset(err, 0, sizeof(err));
+
+  seed_fd = mkstemp(base_template);
+  TEST_CHECK(seed_fd >= 0);
+  TEST_CHECK(close(seed_fd) == 0);
+  TEST_CHECK(unlink(base_template) == 0);
+  TEST_CHECK(snprintf(path_ppm, sizeof(path_ppm), "%s.ppm", base_template) > 0);
+
+  missing_dir = mkdtemp(missing_dir_template);
+  TEST_CHECK(missing_dir != 0);
+  TEST_CHECK(rmdir(missing_dir) == 0);
+  TEST_CHECK(snprintf(path_missing, sizeof(path_missing), "%s/out.ppm", missing_dir_template) > 0);
+
+  TEST_CHECK(!hv_write_ppm(0, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_ppm(path_missing, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "failed to open output") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(hv_write_ppm(path_ppm, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(stat(path_ppm, &st) == 0);
+  TEST_CHECK(st.st_size > 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_ppm(path_ppm, pixels, UINT32_MAX, UINT32_MAX, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "image too large for host size_t") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_ppm_stream(0, path_ppm, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments") != 0);
+
+  ro = fopen(path_ppm, "rb");
+  TEST_CHECK(ro != 0);
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_ppm_stream(ro, path_ppm, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "failed to write ppm header") != 0);
+  TEST_CHECK(fclose(ro) == 0);
+
+  TEST_CHECK(unlink(path_ppm) == 0);
+}
+
+static void test_png_writer_wrapper_and_error_paths(void)
+{
+  char base_template[] = "/tmp/hv_png_wrap_XXXXXX";
+  char missing_dir_template[] = "/tmp/hv_png_missing_XXXXXX";
+  char path_png[192];
+  char path_missing[192];
+  uint8_t pixels[12] = {
+    0x00u, 0x00u, 0x00u,
+    0x11u, 0x22u, 0x33u,
+    0x44u, 0x55u, 0x66u,
+    0x77u, 0x88u, 0x99u
+  };
+  int seed_fd = -1;
+  char *missing_dir = 0;
+  char err[256];
+  FILE *fp = 0;
+
+  memset(err, 0, sizeof(err));
+
+  seed_fd = mkstemp(base_template);
+  TEST_CHECK(seed_fd >= 0);
+  TEST_CHECK(close(seed_fd) == 0);
+  TEST_CHECK(unlink(base_template) == 0);
+  TEST_CHECK(snprintf(path_png, sizeof(path_png), "%s.png", base_template) > 0);
+
+  missing_dir = mkdtemp(missing_dir_template);
+  TEST_CHECK(missing_dir != 0);
+  TEST_CHECK(rmdir(missing_dir) == 0);
+  TEST_CHECK(snprintf(path_missing, sizeof(path_missing), "%s/out.png", missing_dir_template) > 0);
+
+#ifdef HV_TEST_HAVE_PNG
+  TEST_CHECK(!hv_write_png(0, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_png(path_missing, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "failed to open output") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(hv_write_png(path_png, pixels, 2u, 2u, err, sizeof(err)));
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_png(path_png, pixels, UINT32_MAX, 1u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "libpng failed while writing png stream") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_png_stream(0, path_png, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments") != 0);
+
+  fp = tmpfile();
+  TEST_CHECK(fp != 0);
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_png_stream(fp, path_png, pixels, UINT32_MAX, 1u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "libpng failed while writing png stream") != 0);
+  TEST_CHECK(fclose(fp) == 0);
+
+  TEST_CHECK(unlink(path_png) == 0);
+#else
+  TEST_CHECK(!hv_write_png(path_png, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "libpng is not available") != 0);
+
+  fp = tmpfile();
+  TEST_CHECK(fp != 0);
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_write_png_stream(fp, path_png, pixels, 2u, 2u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "libpng is not available") != 0);
+  TEST_CHECK(fclose(fp) == 0);
+#endif
+}
+
+static void test_image_writers_null_error_buffer_paths(void)
+{
+  uint8_t pixel[3] = {0u, 0u, 0u};
+
+  TEST_CHECK(!hv_write_ppm(0, pixel, 1u, 1u, 0, 0u));
+  TEST_CHECK(!hv_write_ppm_stream(0, "x.ppm", pixel, 1u, 1u, 0, 0u));
+
+#ifdef HV_TEST_HAVE_PNG
+  TEST_CHECK(!hv_write_png(0, pixel, 1u, 1u, 0, 0u));
+  TEST_CHECK(!hv_write_png_stream(0, "x.png", pixel, 1u, 1u, 0, 0u));
+#else
+  FILE *fp = 0;
+  fp = tmpfile();
+  TEST_CHECK(fp != 0);
+  TEST_CHECK(!hv_write_png("x.png", pixel, 1u, 1u, 0, 0u));
+  TEST_CHECK(!hv_write_png_stream(fp, "x.png", pixel, 1u, 1u, 0, 0u));
+  TEST_CHECK(fclose(fp) == 0);
+#endif
 }
 
 static void test_render_integration(void)
@@ -300,6 +591,104 @@ static void test_render_paginate_and_legend(void)
   TEST_CHECK(unlink(legend_path) == 0);
 }
 
+static void test_render_rect_hilbert_integration(void)
+{
+  char input_template[] = "/tmp/hv_rect_input_XXXXXX";
+  char output_template[] = "/tmp/hv_rect_output_XXXXXX";
+  uint8_t payload[] = {0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u};
+  int input_fd = -1;
+  int output_fd = -1;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+  struct stat out_stat;
+  FILE *out_file = 0;
+  char header[16];
+  ssize_t wrote = 0;
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.layout = HV_LAYOUT_RECT_HILBERT;
+  options.dimensions_set = 1;
+  options.width = 3u;
+  options.height = 2u;
+  options.paginate = 0;
+
+  TEST_CHECK(hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(result.input_bytes == sizeof(payload));
+  TEST_CHECK(result.capacity == 6u);
+  TEST_CHECK(result.page_count == 1u);
+  TEST_CHECK(result.order == 0u);
+  TEST_CHECK(result.side == 0u);
+
+  TEST_CHECK(stat(output_template, &out_stat) == 0);
+  TEST_CHECK((uint64_t)out_stat.st_size == 29u);
+
+  out_file = fopen(output_template, "rb");
+  TEST_CHECK(out_file != 0);
+  TEST_CHECK(fread(header, 1u, 11u, out_file) == 11u);
+  TEST_CHECK(memcmp(header, "P6\n3 2\n255\n", 11u) == 0);
+  TEST_CHECK(fclose(out_file) == 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_rect_hilbert_strict_rejects_parity(void)
+{
+  char input_template[] = "/tmp/hv_rect_strict_input_XXXXXX";
+  char output_template[] = "/tmp/hv_rect_strict_output_XXXXXX";
+  uint8_t payload[] = {0x10u, 0x11u, 0x12u, 0x13u};
+  int input_fd = -1;
+  int output_fd = -1;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+  ssize_t wrote = 0;
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.layout = HV_LAYOUT_RECT_HILBERT;
+  options.dimensions_set = 1;
+  options.width = 3u;  /* larger odd */
+  options.height = 2u; /* smaller even */
+  options.strict_adjacency = 1;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "strict adjacency rejects") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
 static void test_render_respects_max_image_cap(void)
 {
   char input_template[] = "/tmp/hv_cap_input_XXXXXX";
@@ -345,6 +734,22 @@ static void test_render_respects_max_image_cap(void)
   TEST_CHECK(unsetenv("HILBERTVIZ_MAX_IMAGE_BYTES") == 0);
   TEST_CHECK(unlink(input_template) == 0);
   TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_ppm_stream_rejects_size_overflow(void)
+{
+  FILE *fp = 0;
+  uint8_t pixel[3] = {0u, 0u, 0u};
+  char err[256];
+
+  memset(err, 0, sizeof(err));
+  fp = tmpfile();
+  TEST_CHECK(fp != 0);
+  TEST_CHECK(
+    !hv_write_image_stream("overflow.ppm", fp, pixel, UINT32_MAX, UINT32_MAX, err, sizeof(err))
+  );
+  TEST_CHECK(strstr(err, "image too large") != 0);
+  TEST_CHECK(fclose(fp) == 0);
 }
 
 static void test_file_io_slice_and_stream_semantics(void)
@@ -410,6 +815,96 @@ static void test_file_io_stream_detects_truncate_race(void)
   TEST_CHECK(!hv_stream_read_exact(&stream, tmp, sizeof(tmp), err, sizeof(err)));
   TEST_CHECK(strstr(err, "unexpected EOF") != 0);
   TEST_CHECK(hv_close_input_stream(&stream, err, sizeof(err)));
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_file_io_additional_error_paths(void)
+{
+  char input_template[] = "/tmp/hv_fileio_extra_XXXXXX";
+  char missing_template[] = "/tmp/hv_fileio_missing_XXXXXX";
+  uint8_t payload[] = {0xC0u, 0xC1u, 0xC2u, 0xC3u};
+  int input_fd = -1;
+  int missing_fd = -1;
+  ssize_t wrote = 0;
+  HvBuffer slice;
+  HvInputStream stream;
+  uint8_t byte = 0u;
+  uint8_t tiny[3] = {0u, 0u, 0u};
+  char err[256];
+
+  memset(&slice, 0, sizeof(slice));
+  memset(&stream, 0, sizeof(stream));
+  memset(err, 0, sizeof(err));
+
+  missing_fd = mkstemp(missing_template);
+  TEST_CHECK(missing_fd >= 0);
+  TEST_CHECK(close(missing_fd) == 0);
+  TEST_CHECK(unlink(missing_template) == 0);
+
+  TEST_CHECK(!hv_read_file_slice(0, 0u, 0, 0u, &slice, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for file read") != 0);
+  TEST_CHECK(!hv_read_file_slice(0, 0u, 0, 0u, &slice, 0, 0u));
+  TEST_CHECK(!hv_read_file_slice(missing_template, 0u, 0, 0u, &slice, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "failed to open input") != 0);
+
+  TEST_CHECK(!hv_open_file_slice_stream(0, 0u, 0, 0u, &stream, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for stream open") != 0);
+  TEST_CHECK(!hv_open_file_slice_stream(missing_template, 0u, 0, 0u, 0, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for stream open") != 0);
+  TEST_CHECK(!hv_open_file_slice_stream(missing_template, 0u, 0, 0u, &stream, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "failed to open input") != 0);
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_read_file_slice(input_template, 3u, 1, 3u, &slice, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "outside file size") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(hv_read_file_slice(input_template, (uint64_t)sizeof(payload), 1, 0u, &slice, err, sizeof(err)));
+  TEST_CHECK(slice.data == 0);
+  TEST_CHECK(slice.size == 0u);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_stream_read_exact(0, &byte, 1u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for stream read") != 0);
+  TEST_CHECK(!hv_stream_read_exact(&stream, &byte, 1u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for stream read") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(hv_open_file_slice_stream(input_template, 0u, 1, 1u, &stream, err, sizeof(err)));
+  TEST_CHECK(!hv_stream_read_exact(&stream, 0, 1u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for stream read") != 0);
+  TEST_CHECK(hv_close_input_stream(&stream, err, sizeof(err)));
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(hv_open_file_slice_stream(input_template, 1u, 1, 2u, &stream, err, sizeof(err)));
+  TEST_CHECK(!hv_stream_read_exact(&stream, tiny, sizeof(tiny), err, sizeof(err)));
+  TEST_CHECK(strstr(err, "exceeds remaining slice") != 0);
+  TEST_CHECK(hv_close_input_stream(&stream, err, sizeof(err)));
+
+  TEST_CHECK(!hv_close_input_stream(0, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for stream close") != 0);
+
+  stream.fp = 0;
+  stream.remaining = 7u;
+  stream.total = 7u;
+  TEST_CHECK(hv_close_input_stream(&stream, err, sizeof(err)));
+  TEST_CHECK(stream.remaining == 0u);
+  TEST_CHECK(stream.total == 0u);
+
+  hv_free_buffer(0);
+  slice.data = (uint8_t *)malloc(1u);
+  TEST_CHECK(slice.data != 0);
+  slice.size = 1u;
+  hv_free_buffer(&slice);
+  TEST_CHECK(slice.data == 0);
+  TEST_CHECK(slice.size == 0u);
+
   TEST_CHECK(unlink(input_template) == 0);
 }
 
@@ -894,12 +1389,22 @@ int main(void)
   test_hilbert_pick_order();
   test_hilbert_d2xy_order1();
   test_hilbert_bijection();
+  test_gilbert_rect_bijection();
+  test_gilbert_depth_limit_and_skinny_extremes();
   test_palette_edges();
+  test_image_api_dispatch_and_errors();
+  test_ppm_writer_wrapper_and_error_paths();
+  test_png_writer_wrapper_and_error_paths();
+  test_image_writers_null_error_buffer_paths();
   test_render_integration();
   test_render_paginate_and_legend();
+  test_render_rect_hilbert_integration();
+  test_render_rect_hilbert_strict_rejects_parity();
   test_render_respects_max_image_cap();
+  test_ppm_stream_rejects_size_overflow();
   test_file_io_slice_and_stream_semantics();
   test_file_io_stream_detects_truncate_race();
+  test_file_io_additional_error_paths();
   test_alias_legend_equals_input_rejected();
   test_alias_output_equals_input_rejected();
   test_alias_legend_equals_output_rejected();

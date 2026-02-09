@@ -547,11 +547,33 @@ static void hv_stats_add(HvByteStats *dst, const HvByteStats *src)
   dst->high_bytes += src->high_bytes;
 }
 
-static int hv_select_order(
+static const char *hv_layout_name(int layout)
+{
+  if (layout == HV_LAYOUT_RECT_HILBERT) {
+    return "rect-hilbert";
+  }
+  return "hilbert";
+}
+
+static int hv_rect_has_unavoidable_diagonal(uint32_t width, uint32_t height)
+{
+  uint32_t larger = width;
+  uint32_t smaller = height;
+
+  if (height > width) {
+    larger = height;
+    smaller = width;
+  }
+
+  return ((larger & 1u) != 0u) && ((smaller & 1u) == 0u);
+}
+
+static int hv_select_geometry(
   const HvRenderOptions *options,
   uint64_t input_bytes,
   uint32_t *order_out,
-  uint32_t *side_out,
+  uint32_t *width_out,
+  uint32_t *height_out,
   uint64_t *capacity_out,
   char *err,
   size_t err_size
@@ -559,70 +581,113 @@ static int hv_select_order(
 {
   uint32_t order = 0u;
   uint32_t side = 0u;
+  uint32_t width = 0u;
+  uint32_t height = 0u;
   uint64_t capacity = 0u;
 
-  if ((options == 0) || (order_out == 0) || (side_out == 0) || (capacity_out == 0)) {
-    hv_set_error(err, err_size, "invalid order selection arguments");
+  if ((options == 0) || (order_out == 0) || (width_out == 0) || (height_out == 0) || (capacity_out == 0)) {
+    hv_set_error(err, err_size, "invalid geometry selection arguments");
     return 0;
   }
 
-  if (options->auto_order) {
-    if (options->paginate && (input_bytes > 0u)) {
-      uint32_t page_order = HV_DEFAULT_PAGE_ORDER;
-      uint64_t page_capacity = 0u;
-      uint32_t page_side = 0u;
+  if (options->layout == HV_LAYOUT_RECT_HILBERT) {
+    if (!options->dimensions_set) {
+      hv_set_error(err, err_size, "rect-hilbert layout requires explicit dimensions");
+      return 0;
+    }
+    if ((options->width == 0u) || (options->height == 0u)) {
+      hv_set_error(err, err_size, "dimensions must be positive for rect-hilbert layout");
+      return 0;
+    }
+    if (!hv_mul_u64((uint64_t)options->width, (uint64_t)options->height, &capacity) || (capacity == 0u)) {
+      hv_set_error(err, err_size, "dimension capacity overflow for %ux%u", options->width, options->height);
+      return 0;
+    }
+    if (options->strict_adjacency && hv_rect_has_unavoidable_diagonal(options->width, options->height)) {
+      hv_set_error(
+        err,
+        err_size,
+        "strict adjacency rejects dimensions %ux%u (odd larger side with even smaller side requires a diagonal step)",
+        options->width,
+        options->height
+      );
+      return 0;
+    }
 
-      if (page_order < HV_HILBERT_MIN_ORDER) {
-        page_order = HV_HILBERT_MIN_ORDER;
-      }
-      if (page_order > HV_HILBERT_MAX_ORDER) {
-        page_order = HV_HILBERT_MAX_ORDER;
-      }
+    order = 0u;
+    width = options->width;
+    height = options->height;
+  } else if (options->layout == HV_LAYOUT_HILBERT) {
+    if (options->dimensions_set) {
+      hv_set_error(err, err_size, "dimensions are only supported with --layout rect-hilbert");
+      return 0;
+    }
 
-      if (!hv_hilbert_capacity_for_order(page_order, &page_capacity) || !hv_hilbert_side_for_order(page_order, &page_side)) {
-        hv_set_error(err, err_size, "failed to compute default page order");
-        return 0;
-      }
+    if (options->auto_order) {
+      if (options->paginate && (input_bytes > 0u)) {
+        uint32_t page_order = HV_DEFAULT_PAGE_ORDER;
+        uint64_t page_capacity = 0u;
+        uint32_t page_side = 0u;
 
-      if (input_bytes <= page_capacity) {
-        if (!hv_hilbert_pick_order(input_bytes, &order, &side, &capacity)) {
-          hv_set_error(err, err_size, "failed to select auto order");
+        if (page_order < HV_HILBERT_MIN_ORDER) {
+          page_order = HV_HILBERT_MIN_ORDER;
+        }
+        if (page_order > HV_HILBERT_MAX_ORDER) {
+          page_order = HV_HILBERT_MAX_ORDER;
+        }
+
+        if (!hv_hilbert_capacity_for_order(page_order, &page_capacity) || !hv_hilbert_side_for_order(page_order, &page_side)) {
+          hv_set_error(err, err_size, "failed to compute default page order");
           return 0;
         }
+
+        if (input_bytes <= page_capacity) {
+          if (!hv_hilbert_pick_order(input_bytes, &order, &side, &capacity)) {
+            hv_set_error(err, err_size, "failed to select auto order");
+            return 0;
+          }
+        } else {
+          order = page_order;
+          side = page_side;
+          capacity = page_capacity;
+        }
       } else {
-        order = page_order;
-        side = page_side;
-        capacity = page_capacity;
+        if (!hv_hilbert_pick_order(input_bytes, &order, &side, &capacity)) {
+          hv_set_error(
+            err,
+            err_size,
+            "input slice (%" PRIu64 " bytes) exceeds max order %u capacity; use --paginate",
+            input_bytes,
+            HV_HILBERT_MAX_ORDER
+          );
+          return 0;
+        }
       }
     } else {
-      if (!hv_hilbert_pick_order(input_bytes, &order, &side, &capacity)) {
+      order = options->order;
+      if (!hv_hilbert_side_for_order(order, &side) || !hv_hilbert_capacity_for_order(order, &capacity)) {
         hv_set_error(
           err,
           err_size,
-          "input slice (%" PRIu64 " bytes) exceeds max order %u capacity; use --paginate",
-          input_bytes,
+          "invalid order %u (allowed %u..%u)",
+          order,
+          HV_HILBERT_MIN_ORDER,
           HV_HILBERT_MAX_ORDER
         );
         return 0;
       }
     }
+
+    width = side;
+    height = side;
   } else {
-    order = options->order;
-    if (!hv_hilbert_side_for_order(order, &side) || !hv_hilbert_capacity_for_order(order, &capacity)) {
-      hv_set_error(
-        err,
-        err_size,
-        "invalid order %u (allowed %u..%u)",
-        order,
-        HV_HILBERT_MIN_ORDER,
-        HV_HILBERT_MAX_ORDER
-      );
-      return 0;
-    }
+    hv_set_error(err, err_size, "unknown layout mode");
+    return 0;
   }
 
   *order_out = order;
-  *side_out = side;
+  *width_out = width;
+  *height_out = height;
   *capacity_out = capacity;
   return 1;
 }
@@ -630,8 +695,10 @@ static int hv_select_order(
 static int hv_paint_byte(
   uint8_t *pixels,
   uint64_t pixel_bytes_u64,
-  uint32_t side,
+  int layout,
   uint32_t order,
+  uint32_t width,
+  uint32_t height,
   uint64_t d,
   uint8_t value,
   char *err,
@@ -650,14 +717,33 @@ static int hv_paint_byte(
     hv_set_error(err, err_size, "invalid image buffer");
     return 0;
   }
-
-  hv_byte_to_rgb(value, rgb);
-  if (!hv_hilbert_d2xy(order, d, &x, &y)) {
-    hv_set_error(err, err_size, "hilbert mapping failed at index %" PRIu64, d);
+  if ((width == 0u) || (height == 0u)) {
+    hv_set_error(err, err_size, "invalid image dimensions");
     return 0;
   }
 
-  if (!hv_mul_u64((uint64_t)y, (uint64_t)side, &row_base) || !hv_add_u64(row_base, (uint64_t)x, &row_index)) {
+  hv_byte_to_rgb(value, rgb);
+  if (layout == HV_LAYOUT_HILBERT) {
+    if (!hv_hilbert_d2xy(order, d, &x, &y)) {
+      hv_set_error(err, err_size, "hilbert mapping failed at index %" PRIu64, d);
+      return 0;
+    }
+  } else if (layout == HV_LAYOUT_RECT_HILBERT) {
+    if (!hv_gilbert_d2xy(width, height, d, &x, &y)) {
+      hv_set_error(err, err_size, "gilbert mapping failed at index %" PRIu64, d);
+      return 0;
+    }
+  } else {
+    hv_set_error(err, err_size, "unknown layout mode");
+    return 0;
+  }
+
+  if ((x >= width) || (y >= height)) {
+    hv_set_error(err, err_size, "mapped coordinate out of range");
+    return 0;
+  }
+
+  if (!hv_mul_u64((uint64_t)y, (uint64_t)width, &row_base) || !hv_add_u64(row_base, (uint64_t)x, &row_index)) {
     hv_set_error(err, err_size, "pixel coordinate overflow");
     return 0;
   }
@@ -682,13 +768,26 @@ static int hv_write_legend_header(
   const HvRenderOptions *options,
   uint64_t input_bytes,
   uint32_t order,
-  uint32_t side,
+  uint32_t width,
+  uint32_t height,
   uint64_t capacity,
   uint64_t page_count
 )
 {
+  char order_text[32];
+
   if ((legend_fp == 0) || (options == 0)) {
     return 0;
+  }
+
+  if (options->layout == HV_LAYOUT_HILBERT) {
+    if (snprintf(order_text, sizeof(order_text), "%u", order) <= 0) {
+      return 0;
+    }
+  } else {
+    if (snprintf(order_text, sizeof(order_text), "%s", "n/a") <= 0) {
+      return 0;
+    }
   }
 
   if (
@@ -697,20 +796,24 @@ static int hv_write_legend_header(
       "# hilbertviz legend\n"
       "input=%s\n"
       "output_base=%s\n"
+      "layout=%s\n"
       "offset=%" PRIu64 "\n"
       "length=%s\n"
-      "order=%u\n"
-      "side=%u\n"
+      "order=%s\n"
+      "width=%u\n"
+      "height=%u\n"
       "capacity_per_page=%" PRIu64 "\n"
       "page_count=%" PRIu64 "\n"
       "input_bytes=%" PRIu64 "\n"
       "columns=page_index,page_bytes,null_bytes,low_bytes,ascii_bytes,high_bytes\n",
       options->input_path,
       options->output_path,
+      hv_layout_name(options->layout),
       options->offset,
       options->has_length ? "explicit" : "until_eof",
-      order,
-      side,
+      order_text,
+      width,
+      height,
       capacity,
       page_count,
       input_bytes
@@ -777,7 +880,8 @@ int hv_render_file(
   int input_fd = -1;
   FILE *legend_fp = 0;
   uint32_t order = 0u;
-  uint32_t side = 0u;
+  uint32_t width = 0u;
+  uint32_t height = 0u;
   uint64_t capacity = 0u;
   uint64_t pixel_count = 0u;
   uint64_t pixel_bytes_u64 = 0;
@@ -826,7 +930,7 @@ int hv_render_file(
     return 0;
   }
 
-  if (!hv_select_order(options, stream.total, &order, &side, &capacity, err, err_size)) {
+  if (!hv_select_geometry(options, stream.total, &order, &width, &height, &capacity, err, err_size)) {
     (void)hv_close_input_stream(&stream, 0, 0u);
     return 0;
   }
@@ -908,7 +1012,7 @@ int hv_render_file(
       (void)hv_close_input_stream(&stream, 0, 0u);
       return 0;
     }
-    if (!hv_write_legend_header(legend_fp, options, stream.total, order, side, capacity, page_count)) {
+    if (!hv_write_legend_header(legend_fp, options, stream.total, order, width, height, capacity, page_count)) {
       hv_set_error(err, err_size, "failed to write legend header");
       (void)fclose(legend_fp);
       free(pixels);
@@ -953,7 +1057,7 @@ int hv_render_file(
       for (i = 0u; i < chunk; ++i, ++d) {
         uint8_t value = read_buf[i];
         hv_stats_add_byte(&page_stats, value);
-        if (!hv_paint_byte(pixels, pixel_bytes_u64, side, order, d, value, err, err_size)) {
+        if (!hv_paint_byte(pixels, pixel_bytes_u64, options->layout, order, width, height, d, value, err, err_size)) {
           if (legend_fp != 0) {
             (void)fclose(legend_fp);
           }
@@ -1001,7 +1105,7 @@ int hv_render_file(
       (void)hv_close_input_stream(&stream, 0, 0u);
       return 0;
     }
-    if (!hv_write_image_stream(page_output_path, page_output_fp, pixels, side, side, err, err_size)) {
+    if (!hv_write_image_stream(page_output_path, page_output_fp, pixels, width, height, err, err_size)) {
       free(page_output_path);
       (void)fclose(page_output_fp);
       if (legend_fp != 0) {
@@ -1057,7 +1161,7 @@ int hv_render_file(
   }
 
   result->order = order;
-  result->side = side;
+  result->side = (options->layout == HV_LAYOUT_HILBERT) ? width : 0u;
   result->capacity = capacity;
   result->input_bytes = total_stats.total_bytes;
   result->page_count = page_count;

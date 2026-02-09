@@ -4,6 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define HV_LAYOUT_HILBERT 0
+#define HV_LAYOUT_RECT_HILBERT 1
+
 typedef struct HvRenderOptions {
   const char *input_path;
   const char *output_path;
@@ -15,6 +18,11 @@ typedef struct HvRenderOptions {
   uint32_t order;
   int paginate;
   int legend_enabled;
+  int layout;
+  int dimensions_set;
+  uint32_t width;
+  uint32_t height;
+  int strict_adjacency;
 } HvRenderOptions;
 
 typedef struct HvRenderResult {

@@ -11,9 +11,10 @@ We take the security of `hilbertviz` seriously. If you discover a security vulne
 `hilbertviz` is built with a "security-first" approach for C11 development. Our defensive measures include:
 
 ### 1. Memory and Integer Safety
-*   **Bounded Arithmetic**: All calculations for buffer sizes, image dimensions, and offsets use overflow-checked helpers (`hv_mul_u64`, `hv_add_u64`).
+*   **Bounded Arithmetic**: Critical calculations for buffer sizes, image dimensions, offsets, row sizes, and pixel indexing use overflow-checked helpers (for example: `hv_mul_u64`, `hv_add_u64`, `hv_add_size`).
+*   **Recursion Safety**: The recursive generalized Hilbert (Gilbert) traversal uses divide-and-conquer, carries explicit depth tracking, and enforces a hard maximum recursion depth. This bounds stack usage even for extreme dimensions.
 *   **Memory Caps**: A default memory allocation cap (256MB) prevents Denial-of-Service via large images. This is configurable via `HILBERTVIZ_MAX_IMAGE_BYTES`.
-*   **Safe I/O**: We avoid unsafe C functions (e.g., `gets`, `sprintf`). We use `snprintf` and `vsnprintf` exclusively.
+*   **Safe I/O**: We avoid unsafe C string APIs (e.g., `gets`, `sprintf`) and use bounded formatting (`snprintf`, `vsnprintf`) where formatted strings are required.
 
 ### 2. Path and File System Security
 *   **Destructive Alias Prevention**: The tool uses `fstat` and inode comparison (`st_dev`, `st_ino`) to detect if an output path points to the same physical file as the input, preventing data loss.

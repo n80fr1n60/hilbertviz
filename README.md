@@ -6,8 +6,10 @@
 
 - Linux-focused C11 implementation.
 - Auto-sized Hilbert grid (`2^order x 2^order`) or manual `--order`.
+- Optional rectangular generalized traversal (`--layout rect-hilbert --dimensions WxH`).
 - Optional `--offset` / `--length` slicing for large files.
 - Optional pagination (`--paginate`) for very large inputs.
+- Optional planning mode (`--dry-run`) to validate fit and print suggestions.
 - Optional legend sidecar file with page and total byte-range stats.
 - Output format dispatch by extension:
   - `.ppm` always supported.
@@ -45,6 +47,18 @@ Run tests:
 ctest --test-dir build --output-on-failure
 ```
 
+Static analyzer (custom clang-20 pinned):
+
+```bash
+CC=clang-20 CXX=clang++ cmake -S . -B build-scan-clang20 -DCMAKE_BUILD_TYPE=Debug -DHILBERTVIZ_WARNINGS_AS_ERRORS=ON
+scan-build --status-bugs --keep-empty -plist-html -o scan-build-report \
+  --use-analyzer=clang-20 \
+  --use-cc=clang-20 \
+  --use-c++=clang++ \
+  cmake --build build-scan-clang20 --parallel
+ctest --test-dir build-scan-clang20 --output-on-failure
+```
+
 Strict Clang note:
 
 - CI uses `-Wformat=2` with warnings-as-errors. Error helper wrappers that forward
@@ -69,6 +83,24 @@ Slice input:
 
 ```bash
 ./build/src/hilbertviz input.bin -o output.ppm --offset 4096 --length 65536
+```
+
+Rectangular generalized layout:
+
+```bash
+./build/src/hilbertviz input.bin -o output.ppm --layout rect-hilbert --dimensions 640x480
+```
+
+Dry-run planning (no output files written):
+
+```bash
+./build/src/hilbertviz input.bin -o output.ppm --layout rect-hilbert --dimensions 640x480 --offset 4096 --length 65536 --dry-run
+```
+
+Strict adjacency policy for rectangular mode:
+
+```bash
+./build/src/hilbertviz input.bin -o output.ppm --layout rect-hilbert --dimensions 15x12 --strict-adjacency
 ```
 
 PNG output:
@@ -107,12 +139,15 @@ Help:
 - Override cap with `HILBERTVIZ_MAX_IMAGE_BYTES=<bytes>` (`0` disables cap).
 - Numeric CLI values are strict unsigned decimal (`+`/`-` forms are rejected).
 - Slice validation uses `fstat` on the opened file descriptor to avoid path-race validation gaps.
+- `--strict-adjacency` can reject rectangular odd/even parity dimensions that require a diagonal step.
 
 ## Output format
 
 - PPM output is binary `P6`.
 - PNG output uses libpng when available.
 - For multi-page output, files are named with `_pageNNNN` suffixes.
+- `--layout hilbert` is canonical square Hilbert (`2^n x 2^n`).
+- `--layout rect-hilbert` is a generalized rectangular Hilbert-like traversal.
 
 ## Fuzzing
 
@@ -268,6 +303,27 @@ One-command coverage runner (separate build dir, safe with active AFL builds):
 
 `run_coverage.sh` only accepts `BUILD_DIR` names that start with `build-coverage`
 and stay under this repository root (no absolute paths or `..` traversal).
+
+Clang 20 source-based coverage (`llvm-profdata` + `llvm-cov`):
+
+```bash
+./fuzz/scripts/run_coverage_clang20.sh
+```
+
+`run_coverage_clang20.sh` only accepts `BUILD_DIR` names that start with
+`build-coverage-clang20` and stay under this repository root.
+
+If clang 20 cannot find `libclang_rt.profile`, you can point to a runtime archive:
+
+```bash
+FALLBACK_PROFILE_RUNTIME=/path/to/libclang_rt.profile-x86_64.a ./fuzz/scripts/run_coverage_clang20.sh
+```
+
+Outputs:
+
+- `build-coverage-clang20/coverage-report.txt` (all files)
+- `build-coverage-clang20/coverage-report-src-only.txt` (sources only)
+- `build-coverage-clang20/coverage-html/index.html` (if `GENERATE_HTML=1`)
 
 Replay active AFL corpus into coverage (queue/crashes/hangs):
 

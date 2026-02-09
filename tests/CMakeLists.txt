@@ -28,6 +28,52 @@ set_tests_properties(
 )
 
 add_test(
+  NAME hv_cli_rect_requires_dimensions
+  COMMAND $<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o ${CMAKE_BINARY_DIR}/cli_rect_missing_dims.ppm --layout rect-hilbert
+)
+set_tests_properties(
+  hv_cli_rect_requires_dimensions
+  PROPERTIES
+    WILL_FAIL TRUE
+)
+
+add_test(
+  NAME hv_cli_rect_dry_run
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o ${CMAKE_BINARY_DIR}/cli_rect_dry_run.ppm --layout rect-hilbert --dimensions 5x4 --dry-run 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -q 'layout: rect-hilbert'"
+)
+
+add_test(
+  NAME hv_cli_default_legend_path
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out_path='${CMAKE_BINARY_DIR}/cli_default_legend.ppm'; legend_path=\"${CMAKE_BINARY_DIR}/cli_default_legend.ppm.legend.txt\"; rm -f \"$out_path\" \"$legend_path\"; out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o \"$out_path\" --legend 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && [ -f \"$legend_path\" ] && printf '%s' \"$out\" | grep -Fq \"Wrote legend $legend_path\""
+)
+
+add_test(
+  NAME hv_cli_hilbert_dry_run_manual_order
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o ${CMAKE_BINARY_DIR}/cli_hilbert_dry_run_manual.ppm --order 3 --dry-run 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -q 'layout: hilbert' && printf '%s' \"$out\" | grep -q 'order: 3' && printf '%s' \"$out\" | grep -q 'dimensions: 8x8'"
+)
+
+add_test(
+  NAME hv_cli_hilbert_dry_run_paginate_large
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_hilbert_dry_run_large.bin'; rm -f \"$input\"; truncate -s 17000000 \"$input\"; out=\"$($<TARGET_FILE:hilbertviz> \"$input\" -o ${CMAKE_BINARY_DIR}/cli_hilbert_dry_run_large.ppm --paginate --dry-run 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -q 'order: 12' && printf '%s' \"$out\" | grep -q 'page_count: 2'"
+)
+
+add_test(
   NAME hv_cov_reject_build_dir_parent_escape
   COMMAND
     ${CMAKE_COMMAND} -E env

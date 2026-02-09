@@ -40,6 +40,20 @@ static void HV_PRINTF_LIKE(3, 4) hv_set_error(char *err, size_t err_size, const 
   va_end(args);
 }
 
+#ifdef HV_HAVE_LIBPNG
+static int hv_u64_mul(uint64_t a, uint64_t b, uint64_t *out)
+{
+  if (out == 0) {
+    return 0;
+  }
+  if ((a != 0u) && (b > (UINT64_MAX / a))) {
+    return 0;
+  }
+  *out = a * b;
+  return 1;
+}
+#endif
+
 int hv_write_png(
   const char *path,
   const uint8_t *pixels,
@@ -101,7 +115,7 @@ int hv_write_png_stream(
   png_structp png_ptr = 0;
   png_infop info_ptr = 0;
   uint64_t row_bytes_u64 = 0u;
-  size_t row_bytes = 0u;
+  uint64_t total_bytes_u64 = 0u;
   uint32_t y = 0u;
   (void)path_hint;
 
@@ -110,16 +124,14 @@ int hv_write_png_stream(
     return 0;
   }
 
-  row_bytes_u64 = (uint64_t)width * 3u;
-  if (row_bytes_u64 > (uint64_t)SIZE_MAX) {
+  if (!hv_u64_mul((uint64_t)width, 3u, &row_bytes_u64) || (row_bytes_u64 > (uint64_t)SIZE_MAX)) {
     hv_set_error(err, err_size, "png row size overflow");
     return 0;
   }
-  if ((height > 0u) && (row_bytes_u64 > ((uint64_t)SIZE_MAX / (uint64_t)height))) {
+  if (!hv_u64_mul(row_bytes_u64, (uint64_t)height, &total_bytes_u64) || (total_bytes_u64 > (uint64_t)SIZE_MAX)) {
     hv_set_error(err, err_size, "png image too large for host size_t");
     return 0;
   }
-  row_bytes = (size_t)row_bytes_u64;
 
   png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, 0, 0, 0);
   if (png_ptr == 0) {
@@ -155,7 +167,17 @@ int hv_write_png_stream(
 
   png_write_info(png_ptr, info_ptr);
   for (y = 0u; y < height; ++y) {
-    const png_bytep row = (const png_bytep)(pixels + ((size_t)y * row_bytes));
+    uint64_t row_offset_u64 = 0u;
+    size_t row_offset = 0u;
+    png_const_bytep row = 0;
+
+    if (!hv_u64_mul((uint64_t)y, row_bytes_u64, &row_offset_u64) || (row_offset_u64 > (uint64_t)SIZE_MAX)) {
+      hv_set_error(err, err_size, "png row offset overflow");
+      png_destroy_write_struct(&png_ptr, &info_ptr);
+      return 0;
+    }
+    row_offset = (size_t)row_offset_u64;
+    row = (const png_bytep)(pixels + row_offset);
     png_write_row(png_ptr, row);
   }
   png_write_end(png_ptr, info_ptr);
