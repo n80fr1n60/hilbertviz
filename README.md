@@ -7,7 +7,7 @@
 - Linux-focused C11 implementation.
 - Auto-sized Hilbert grid (`2^order x 2^order`) or manual `--order`.
 - Optional rectangular generalized traversal (`--layout rect-hilbert --dimensions WxH`).
-- Experimental `hilbertviz3d` scaffold with tested 3D Hilbert mapping helpers.
+- Experimental `hilbertviz3d` point-cloud pipeline for selected file slices.
 - Optional `--offset` / `--length` slicing for large files.
 - Optional pagination (`--paginate`) for very large inputs.
 - Optional planning mode (`--dry-run`) to validate fit and print suggestions.
@@ -135,6 +135,8 @@ Entropy for the selected slice:
 Experimental 3D scaffold:
 
 ```bash
+./build/src/hilbertviz3d input.bin --order 5
+./build/src/hilbertviz3d input.bin --order 5 --offset 4096 --length 65536
 ./build/src/hilbertviz3d --help
 ```
 
@@ -167,7 +169,7 @@ Help:
 - For multi-page output, files are named with `_pageNNNN` suffixes.
 - `--layout hilbert` is canonical square Hilbert (`2^n x 2^n`).
 - `--layout rect-hilbert` is a generalized rectangular Hilbert-like traversal.
-- `hilbertviz3d` currently exposes the 3D mapping core with order cap `7`; interactive rendering is deferred.
+- `hilbertviz3d` currently builds a normalized colored 3D point cloud and prints a summary; interactive rendering is deferred.
 - `--entropy` prints Shannon entropy for the exact rendered slice in bits/byte.
 - Legend output appends `entropy_bits_per_byte=<value>` for the rendered slice.
 

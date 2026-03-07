@@ -4,6 +4,7 @@ set(HV_FUZZ_CORE_SOURCES
   ${PROJECT_SOURCE_DIR}/src/hilbert3d.c
   ${PROJECT_SOURCE_DIR}/src/image.c
   ${PROJECT_SOURCE_DIR}/src/palette.c
+  ${PROJECT_SOURCE_DIR}/src/point_cloud3d.c
   ${PROJECT_SOURCE_DIR}/src/png_writer.c
   ${PROJECT_SOURCE_DIR}/src/ppm.c
   ${PROJECT_SOURCE_DIR}/src/render.c

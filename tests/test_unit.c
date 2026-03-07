@@ -3,6 +3,7 @@
 #include "hilbert3d.h"
 #include "image.h"
 #include "palette.h"
+#include "point_cloud3d.h"
 #include "png_writer.h"
 #include "ppm.h"
 #include "render.h"
@@ -86,6 +87,11 @@ static void test_restore_env(const char *name, char *saved_value)
 static double test_abs_double(double value)
 {
   return (value < 0.0) ? -value : value;
+}
+
+static double test_normalized_axis(uint32_t coord, uint32_t side)
+{
+  return ((((double)coord + 0.5) / (double)side) * 2.0) - 1.0;
 }
 
 static void test_hilbert_order_helpers(void)
@@ -337,6 +343,168 @@ static void test_hilbert3d_bijection_and_adjacency(void)
   TEST_CHECK(!hv_hilbert3d_d2xyz(order, 0u, 0, &prev_y, &prev_z));
 
   free(visited);
+}
+
+static void test_point_cloud3d_empty_slice(void)
+{
+  char input_template[] = "/tmp/hv_point_cloud3d_empty_XXXXXX";
+  int input_fd = -1;
+  HvPointCloud3D cloud;
+  char err[256];
+
+  memset(&cloud, 0, sizeof(cloud));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_build_point_cloud3d(input_template, 1u, 0u, 1, 0u, &cloud, err, sizeof(err)));
+  TEST_CHECK(cloud.points == 0);
+  TEST_CHECK(cloud.count == 0u);
+  TEST_CHECK(cloud.order == 1u);
+  TEST_CHECK(cloud.side == 2u);
+  TEST_CHECK(cloud.capacity == 8u);
+
+  hv_free_point_cloud3d(&cloud);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_point_cloud3d_small_deterministic(void)
+{
+  char input_template[] = "/tmp/hv_point_cloud3d_small_XXXXXX";
+  const uint8_t payload[] = {0x00u, 0x1Fu, 0x20u, 0xFFu};
+  const uint8_t expected_rgb[][3] = {
+    {0u, 0u, 0u},
+    {0u, 255u, 0u},
+    {0u, 0u, 32u},
+    {255u, 0u, 0u}
+  };
+  const uint32_t expected_xyz[][3] = {
+    {0u, 0u, 0u},
+    {0u, 0u, 1u},
+    {0u, 1u, 1u},
+    {0u, 1u, 0u}
+  };
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  HvPointCloud3D cloud;
+  size_t i = 0u;
+  char err[256];
+
+  memset(&cloud, 0, sizeof(cloud));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_build_point_cloud3d(input_template, 1u, 0u, 0, 0u, &cloud, err, sizeof(err)));
+  TEST_CHECK(cloud.points != 0);
+  TEST_CHECK(cloud.count == sizeof(payload));
+  TEST_CHECK(cloud.order == 1u);
+  TEST_CHECK(cloud.side == 2u);
+  TEST_CHECK(cloud.capacity == 8u);
+
+  for (i = 0u; i < cloud.count; ++i) {
+    TEST_CHECK(test_abs_double((double)cloud.points[i].x - test_normalized_axis(expected_xyz[i][0], 2u)) < 1e-6);
+    TEST_CHECK(test_abs_double((double)cloud.points[i].y - test_normalized_axis(expected_xyz[i][1], 2u)) < 1e-6);
+    TEST_CHECK(test_abs_double((double)cloud.points[i].z - test_normalized_axis(expected_xyz[i][2], 2u)) < 1e-6);
+    TEST_CHECK(cloud.points[i].r == expected_rgb[i][0]);
+    TEST_CHECK(cloud.points[i].g == expected_rgb[i][1]);
+    TEST_CHECK(cloud.points[i].b == expected_rgb[i][2]);
+  }
+
+  hv_free_point_cloud3d(&cloud);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_point_cloud3d_near_capacity_slice(void)
+{
+  char input_template[] = "/tmp/hv_point_cloud3d_near_capacity_XXXXXX";
+  const uint32_t order = 3u;
+  uint64_t capacity = 0u;
+  uint64_t last_d = 0u;
+  uint32_t last_x = 0u;
+  uint32_t last_y = 0u;
+  uint32_t last_z = 0u;
+  HvPointCloud3D cloud;
+  uint8_t *payload = 0;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  size_t payload_size = 0u;
+  char err[256];
+
+  memset(&cloud, 0, sizeof(cloud));
+  memset(err, 0, sizeof(err));
+
+  TEST_CHECK(hv_hilbert3d_capacity_for_order(order, &capacity));
+  TEST_CHECK(capacity > 1u);
+  payload_size = (size_t)(capacity - 1u);
+  payload = (uint8_t *)malloc(payload_size);
+  TEST_CHECK(payload != 0);
+  memset(payload, 0x7Fu, payload_size);
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, payload_size);
+  TEST_CHECK(wrote == (ssize_t)payload_size);
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_build_point_cloud3d(input_template, order, 0u, 0, 0u, &cloud, err, sizeof(err)));
+  TEST_CHECK(cloud.count == payload_size);
+  TEST_CHECK(cloud.side == 8u);
+  TEST_CHECK(cloud.capacity == capacity);
+
+  last_d = capacity - 2u;
+  TEST_CHECK(hv_hilbert3d_d2xyz(order, last_d, &last_x, &last_y, &last_z));
+  TEST_CHECK(test_abs_double((double)cloud.points[cloud.count - 1u].x - test_normalized_axis(last_x, cloud.side)) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.points[cloud.count - 1u].y - test_normalized_axis(last_y, cloud.side)) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.points[cloud.count - 1u].z - test_normalized_axis(last_z, cloud.side)) < 1e-6);
+  TEST_CHECK(cloud.points[cloud.count - 1u].r == 32u);
+  TEST_CHECK(cloud.points[cloud.count - 1u].g == 0u);
+  TEST_CHECK(cloud.points[cloud.count - 1u].b == 0u);
+
+  hv_free_point_cloud3d(&cloud);
+  free(payload);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_point_cloud3d_offset_and_length(void)
+{
+  char input_template[] = "/tmp/hv_point_cloud3d_slice_XXXXXX";
+  const uint8_t payload[] = {0xAAu, 0xBBu, 0x00u, 0xFFu, 0x11u};
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  HvPointCloud3D cloud;
+  char err[256];
+
+  memset(&cloud, 0, sizeof(cloud));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_build_point_cloud3d(input_template, 1u, 2u, 1, 2u, &cloud, err, sizeof(err)));
+  TEST_CHECK(cloud.count == 2u);
+  TEST_CHECK(test_abs_double((double)cloud.points[0].x - test_normalized_axis(0u, 2u)) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.points[0].y - test_normalized_axis(0u, 2u)) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.points[0].z - test_normalized_axis(0u, 2u)) < 1e-6);
+  TEST_CHECK(cloud.points[0].r == 0u);
+  TEST_CHECK(cloud.points[0].g == 0u);
+  TEST_CHECK(cloud.points[0].b == 0u);
+  TEST_CHECK(test_abs_double((double)cloud.points[1].z - test_normalized_axis(1u, 2u)) < 1e-6);
+  TEST_CHECK(cloud.points[1].r == 255u);
+  TEST_CHECK(cloud.points[1].g == 0u);
+  TEST_CHECK(cloud.points[1].b == 0u);
+
+  hv_free_point_cloud3d(&cloud);
+  TEST_CHECK(unlink(input_template) == 0);
 }
 
 static void test_palette_edges(void)
@@ -2711,6 +2879,10 @@ int main(void)
   test_hilbert3d_order_helpers();
   test_hilbert3d_d2xyz_order1();
   test_hilbert3d_bijection_and_adjacency();
+  test_point_cloud3d_empty_slice();
+  test_point_cloud3d_small_deterministic();
+  test_point_cloud3d_near_capacity_slice();
+  test_point_cloud3d_offset_and_length();
   test_palette_edges();
   test_image_api_dispatch_and_errors();
   test_ppm_writer_wrapper_and_error_paths();

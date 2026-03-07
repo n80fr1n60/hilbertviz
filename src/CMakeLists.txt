@@ -4,6 +4,7 @@ add_library(hvcore STATIC
   hilbert3d.c
   image.c
   palette.c
+  point_cloud3d.c
   png_writer.c
   ppm.c
   render.c
