@@ -254,6 +254,39 @@ add_test(
       "out=\"$(${PROJECT_SOURCE_DIR}/fuzz/scripts/run_coverage.sh 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -q 'Refusing unsafe BUILD_DIR'"
 )
 
+add_test(
+  NAME hv_tsan_reject_build_dir_parent_escape
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      BUILD_DIR=../hv-tsan-escape
+      DRY_RUN=1
+      bash
+      -lc
+      "out=\"$(${PROJECT_SOURCE_DIR}/scripts/run_tsan.sh 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -q 'Refusing unsafe BUILD_DIR'"
+)
+
+add_test(
+  NAME hv_tsan_reject_build_dir_absolute
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      BUILD_DIR=/tmp/hv-tsan-absolute
+      DRY_RUN=1
+      bash
+      -lc
+      "out=\"$(${PROJECT_SOURCE_DIR}/scripts/run_tsan.sh 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -q 'Refusing unsafe BUILD_DIR'"
+)
+
+add_test(
+  NAME hv_tsan_dry_run
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      BUILD_DIR=build-tsan-dry-run
+      DRY_RUN=1
+      bash
+      -lc
+      "out=\"$(${PROJECT_SOURCE_DIR}/scripts/run_tsan.sh 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq -- '-fsanitize=thread' && printf '%s' \"$out\" | grep -Fq 'HILBERTVIZ_WITH_3D_VIEWER=OFF' && printf '%s' \"$out\" | grep -Fq 'ctest --test-dir'"
+)
+
 if(HILBERTVIZ_COVERAGE)
   find_program(LCOV_EXECUTABLE lcov)
   find_program(GENHTML_EXECUTABLE genhtml)

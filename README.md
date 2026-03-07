@@ -68,6 +68,27 @@ scan-build --status-bugs --keep-empty -plist-html -o scan-build-report \
 ctest --test-dir build-scan-clang20 --output-on-failure
 ```
 
+Host-side ThreadSanitizer helper:
+
+```bash
+./scripts/run_tsan.sh
+```
+
+Useful overrides:
+
+```bash
+BUILD_DIR=build-tsan-png WITH_PNG=1 ./scripts/run_tsan.sh
+BUILD_DIR=build-tsan-viewer WITH_3D_VIEWER=1 ./scripts/run_tsan.sh
+CTEST_REGEX='^(hv_unit|hv_cli_3d_help)$' ./scripts/run_tsan.sh
+DRY_RUN=1 ./scripts/run_tsan.sh
+```
+
+Notes:
+
+- The helper defaults to `gcc`, `-fsanitize=thread`, `-DHILBERTVIZ_WITH_3D_VIEWER=OFF`, and `-DHILBERTVIZ_WITH_PNG=OFF`.
+- `BUILD_DIR` must stay under this repository root and start with `build-tsan`.
+- Run it from your normal host shell; TSan is not reliable inside this harness sandbox.
+
 Strict Clang note:
 
 - CI uses `-Wformat=2` with warnings-as-errors. Error helper wrappers that forward
