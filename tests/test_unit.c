@@ -47,6 +47,41 @@ static int test_write_all(int fd, const uint8_t *buf, size_t size)
   return 1;
 }
 
+static char *test_strdup_local(const char *text)
+{
+  size_t len = 0u;
+  char *copy = 0;
+
+  if (text == 0) {
+    return 0;
+  }
+
+  len = strlen(text);
+  copy = (char *)malloc(len + 1u);
+  TEST_CHECK(copy != 0);
+  memcpy(copy, text, len + 1u);
+  return copy;
+}
+
+static char *test_save_env(const char *name)
+{
+  const char *value = getenv(name);
+  if (value == 0) {
+    return 0;
+  }
+  return test_strdup_local(value);
+}
+
+static void test_restore_env(const char *name, char *saved_value)
+{
+  if (saved_value != 0) {
+    TEST_CHECK(setenv(name, saved_value, 1) == 0);
+    free(saved_value);
+  } else {
+    TEST_CHECK(unsetenv(name) == 0);
+  }
+}
+
 static void test_hilbert_order_helpers(void)
 {
   uint32_t side = 0u;
@@ -736,6 +771,37 @@ static void test_render_respects_max_image_cap(void)
   TEST_CHECK(unlink(output_template) == 0);
 }
 
+static void test_render_output_char_device_succeeds(void)
+{
+  char input_template[] = "/tmp/hv_devnull_input_XXXXXX";
+  uint8_t payload[] = {0x00u, 0x01u, 0x20u, 0x7Fu};
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = "/dev/null";
+  options.auto_order = 1;
+
+  TEST_CHECK(hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(result.page_count == 1u);
+  TEST_CHECK(result.input_bytes == (uint64_t)sizeof(payload));
+
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
 static void test_ppm_stream_rejects_size_overflow(void)
 {
   FILE *fp = 0;
@@ -905,6 +971,43 @@ static void test_file_io_additional_error_paths(void)
   TEST_CHECK(slice.data == 0);
   TEST_CHECK(slice.size == 0u);
 
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_file_io_respects_max_slice_cap(void)
+{
+  char input_template[] = "/tmp/hv_slice_cap_input_XXXXXX";
+  char *saved_cap = 0;
+  HvBuffer slice;
+  int input_fd = -1;
+  const off_t large_size = (off_t)(2u * 1024u * 1024u);
+  char err[256];
+
+  memset(&slice, 0, sizeof(slice));
+  memset(err, 0, sizeof(err));
+  saved_cap = test_save_env("HILBERTVIZ_MAX_SLICE_BYTES");
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  TEST_CHECK(ftruncate(input_fd, large_size) == 0);
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(setenv("HILBERTVIZ_MAX_SLICE_BYTES", "1048576", 1) == 0);
+  TEST_CHECK(!hv_read_file_slice(input_template, 0u, 0, 0u, &slice, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "exceeds configured cap") != 0);
+  TEST_CHECK(slice.data == 0);
+  TEST_CHECK(slice.size == 0u);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(setenv("HILBERTVIZ_MAX_SLICE_BYTES", "0", 1) == 0);
+  TEST_CHECK(hv_read_file_slice(input_template, 0u, 0, 0u, &slice, err, sizeof(err)));
+  TEST_CHECK(slice.size == (size_t)large_size);
+  TEST_CHECK(slice.data != 0);
+  TEST_CHECK(slice.data[0] == 0u);
+  TEST_CHECK(slice.data[slice.size - 1u] == 0u);
+
+  hv_free_buffer(&slice);
+  test_restore_env("HILBERTVIZ_MAX_SLICE_BYTES", saved_cap);
   TEST_CHECK(unlink(input_template) == 0);
 }
 
@@ -1300,8 +1403,14 @@ static void test_alias_race_generated_page_swapped_to_input_rejected(void)
   options.paginate = 1;
 
   TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
-  TEST_CHECK(strstr(err, "refusing destructive path alias") != 0);
-  TEST_CHECK(strstr(err, "aliases input") != 0);
+  TEST_CHECK(
+    (strstr(err, "refusing destructive path alias") != 0) ||
+    (strstr(err, "refusing symlink output page path") != 0)
+  );
+  TEST_CHECK(
+    (strstr(err, "aliases input") != 0) ||
+    (strstr(err, "symlink output page path") != 0)
+  );
 
   TEST_CHECK(waitpid(helper_pid, &helper_status, 0) == helper_pid);
   TEST_CHECK(WIFEXITED(helper_status));
@@ -1312,6 +1421,102 @@ static void test_alias_race_generated_page_swapped_to_input_rejected(void)
   free(payload);
   payload = 0;
   TEST_CHECK(unlink(input_path) == 0);
+  (void)unlink(page1_path);
+  (void)unlink(page2_path);
+}
+
+static void test_alias_race_generated_page_swapped_to_legend_rejected(void)
+{
+  char base_template[] = "/tmp/hv_alias_legend_race_XXXXXX";
+  char input_path[192];
+  char output_base[192];
+  char legend_path[192];
+  char page1_path[192];
+  char page2_path[192];
+  uint8_t *payload = 0;
+  size_t payload_size = (size_t)(2u * (1u << 18u)); /* order 9 => 262144 bytes/page */
+  int seed_fd = -1;
+  int input_fd = -1;
+  pid_t helper_pid = (pid_t)-1;
+  int helper_status = 0;
+  size_t i = 0u;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  payload = (uint8_t *)malloc(payload_size);
+  TEST_CHECK(payload != 0);
+  for (i = 0u; i < payload_size; ++i) {
+    payload[i] = (uint8_t)(i & 0xFFu);
+  }
+
+  seed_fd = mkstemp(base_template);
+  TEST_CHECK(seed_fd >= 0);
+  TEST_CHECK(close(seed_fd) == 0);
+  TEST_CHECK(unlink(base_template) == 0);
+
+  TEST_CHECK(snprintf(input_path, sizeof(input_path), "%s.input.bin", base_template) > 0);
+  TEST_CHECK(snprintf(output_base, sizeof(output_base), "%s.ppm", base_template) > 0);
+  TEST_CHECK(snprintf(legend_path, sizeof(legend_path), "%s.legend.txt", base_template) > 0);
+  TEST_CHECK(snprintf(page1_path, sizeof(page1_path), "%s_page0001.ppm", base_template) > 0);
+  TEST_CHECK(snprintf(page2_path, sizeof(page2_path), "%s_page0002.ppm", base_template) > 0);
+
+  input_fd = open(input_path, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+  TEST_CHECK(input_fd >= 0);
+  TEST_CHECK(test_write_all(input_fd, payload, payload_size));
+  TEST_CHECK(close(input_fd) == 0);
+
+  helper_pid = fork();
+  TEST_CHECK(helper_pid >= 0);
+  if (helper_pid == 0) {
+    int ready = 0;
+    int tries = 0;
+    const struct timespec delay = {0, 1000000L};
+
+    for (tries = 0; tries < 20000; ++tries) {
+      if ((access(page1_path, F_OK) == 0) && (access(legend_path, F_OK) == 0)) {
+        ready = 1;
+        break;
+      }
+      (void)nanosleep(&delay, 0);
+    }
+    if (!ready) {
+      _exit(2);
+    }
+
+    (void)unlink(page2_path);
+    if (link(legend_path, page2_path) != 0) {
+      _exit(3);
+    }
+    _exit(0);
+  }
+
+  options.input_path = input_path;
+  options.output_path = output_base;
+  options.legend_enabled = 1;
+  options.legend_path = legend_path;
+  options.auto_order = 0;
+  options.order = 9u;
+  options.paginate = 1;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "refusing destructive path alias") != 0);
+  TEST_CHECK(strstr(err, "aliases open legend path") != 0);
+
+  TEST_CHECK(waitpid(helper_pid, &helper_status, 0) == helper_pid);
+  TEST_CHECK(WIFEXITED(helper_status));
+  TEST_CHECK(WEXITSTATUS(helper_status) == 0);
+
+  test_assert_file_content(input_path, payload, payload_size);
+
+  free(payload);
+  payload = 0;
+  TEST_CHECK(unlink(input_path) == 0);
+  (void)unlink(legend_path);
   (void)unlink(page1_path);
   (void)unlink(page2_path);
 }
@@ -1401,10 +1606,12 @@ int main(void)
   test_render_rect_hilbert_integration();
   test_render_rect_hilbert_strict_rejects_parity();
   test_render_respects_max_image_cap();
+  test_render_output_char_device_succeeds();
   test_ppm_stream_rejects_size_overflow();
   test_file_io_slice_and_stream_semantics();
   test_file_io_stream_detects_truncate_race();
   test_file_io_additional_error_paths();
+  test_file_io_respects_max_slice_cap();
   test_alias_legend_equals_input_rejected();
   test_alias_output_equals_input_rejected();
   test_alias_legend_equals_output_rejected();
@@ -1413,6 +1620,7 @@ int main(void)
   test_alias_legend_equals_generated_page_rejected();
   test_alias_hardlink_output_to_input_rejected();
   test_alias_race_generated_page_swapped_to_input_rejected();
+  test_alias_race_generated_page_swapped_to_legend_rejected();
 #ifdef HV_TEST_HAVE_PNG
   test_render_png_output();
   test_png_stream_rejects_size_overflow();

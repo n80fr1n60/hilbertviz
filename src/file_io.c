@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#define HV_DEFAULT_MAX_SLICE_BYTES (256ULL * 1024ULL * 1024ULL)
+
 #if defined(__GNUC__) || defined(__clang__)
 #define HV_PRINTF_LIKE(fmt_idx, first_arg_idx) __attribute__((format(printf, fmt_idx, first_arg_idx)))
 #else
@@ -50,6 +52,66 @@ static int hv_add_u64(uint64_t a, uint64_t b, uint64_t *out)
     return 0;
   }
   *out = a + b;
+  return 1;
+}
+
+static int hv_parse_u64_decimal_strict(const char *text, uint64_t *out)
+{
+  const unsigned char *p = 0;
+  unsigned long long parsed = 0;
+  char *end = 0;
+
+  if ((text == 0) || (out == 0) || (*text == '\0')) {
+    return 0;
+  }
+  if ((text[0] == '+') || (text[0] == '-')) {
+    return 0;
+  }
+
+  p = (const unsigned char *)text;
+  while (*p != '\0') {
+    if ((*p < (unsigned char)'0') || (*p > (unsigned char)'9')) {
+      return 0;
+    }
+    ++p;
+  }
+
+  errno = 0;
+  parsed = strtoull(text, &end, 10);
+  if ((errno != 0) || (end == text) || (*end != '\0')) {
+    return 0;
+  }
+
+  *out = (uint64_t)parsed;
+  return 1;
+}
+
+static int hv_resolve_max_slice_bytes(uint64_t *out, char *err, size_t err_size)
+{
+  const char *env = getenv("HILBERTVIZ_MAX_SLICE_BYTES");
+  uint64_t parsed = 0u;
+
+  if (out == 0) {
+    hv_set_error(err, err_size, "invalid slice-cap arguments");
+    return 0;
+  }
+
+  if ((env == 0) || (*env == '\0')) {
+    *out = HV_DEFAULT_MAX_SLICE_BYTES;
+    return 1;
+  }
+
+  if (!hv_parse_u64_decimal_strict(env, &parsed)) {
+    hv_set_error(
+      err,
+      err_size,
+      "invalid HILBERTVIZ_MAX_SLICE_BYTES='%s' (expected unsigned decimal bytes)",
+      env
+    );
+    return 0;
+  }
+
+  *out = parsed;
   return 1;
 }
 
@@ -168,6 +230,7 @@ int hv_read_file_slice(
 )
 {
   uint64_t slice_len = 0;
+  uint64_t max_slice_bytes = 0u;
   size_t target_size = 0;
   FILE *fp = 0;
   uint8_t *buf = 0;
@@ -188,6 +251,22 @@ int hv_read_file_slice(
   }
 
   if (!hv_validate_slice_from_file(fp, path, offset, has_length, length, &slice_len, err, err_size)) {
+    (void)fclose(fp);
+    return 0;
+  }
+
+  if (!hv_resolve_max_slice_bytes(&max_slice_bytes, err, err_size)) {
+    (void)fclose(fp);
+    return 0;
+  }
+  if ((max_slice_bytes > 0u) && (slice_len > max_slice_bytes)) {
+    hv_set_error(
+      err,
+      err_size,
+      "slice (%" PRIu64 " bytes) exceeds configured cap (%" PRIu64 " bytes); set HILBERTVIZ_MAX_SLICE_BYTES to raise/disable (0) the cap",
+      slice_len,
+      max_slice_bytes
+    );
     (void)fclose(fp);
     return 0;
   }

@@ -137,8 +137,11 @@ Help:
 - Destructive path aliasing is rejected across input/output/legend/page paths.
 - Image allocation is capped by default (`256 MiB`) and fails fast when exceeded.
 - Override cap with `HILBERTVIZ_MAX_IMAGE_BYTES=<bytes>` (`0` disables cap).
+- Full-buffer slice reads are capped by default (`256 MiB`) and fail fast when exceeded.
+- Override full-buffer cap with `HILBERTVIZ_MAX_SLICE_BYTES=<bytes>` (`0` disables cap).
 - Numeric CLI values are strict unsigned decimal (`+`/`-` forms are rejected).
 - Slice validation uses `fstat` on the opened file descriptor to avoid path-race validation gaps.
+- Output targets must be regular files or character devices; symlinks/FIFOs/sockets are rejected.
 - `--strict-adjacency` can reject rectangular odd/even parity dimensions that require a diagonal step.
 
 ## Output format

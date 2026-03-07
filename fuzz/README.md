@@ -28,6 +28,12 @@ Targets:
 - `build-libfuzzer/fuzz/fuzz_pipeline_libfuzzer`
 - `build-libfuzzer/fuzz/fuzz_file_slice_libfuzzer`
 
+Short smoke run:
+
+```bash
+cmake --build build-libfuzzer --target fuzz_smoke
+```
+
 Run with RAM-disk corpus/artifacts:
 
 ```bash
@@ -60,6 +66,12 @@ Targets:
 
 - `build-fuzz-afl/fuzz/fuzz_pipeline_afl`
 - `build-fuzz-afl/fuzz/fuzz_file_slice_afl`
+
+Short smoke run:
+
+```bash
+cmake --build build-fuzz-afl --target fuzz_smoke
+```
 
 Launch AFL++ in tmux (default: 6 instances, 1 master + 5 slaves):
 

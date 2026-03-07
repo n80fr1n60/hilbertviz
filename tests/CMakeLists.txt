@@ -56,6 +56,24 @@ add_test(
 )
 
 add_test(
+  NAME hv_cli_dev_null_output
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o /dev/null 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Wrote /dev/null'"
+)
+
+add_test(
+  NAME hv_cli_reject_fifo_output
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "fifo='${CMAKE_BINARY_DIR}/cli_fifo_output.pipe'; rm -f \"$fifo\"; mkfifo \"$fifo\"; out=\"$(timeout 2 $<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o \"$fifo\" 2>&1)\"; rc=$?; rm -f \"$fifo\"; echo \"$out\"; [ \"$rc\" -ne 124 ] && [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Eq 'unsupported .*target type'"
+)
+
+add_test(
   NAME hv_cli_hilbert_dry_run_manual_order
   COMMAND
     ${CMAKE_COMMAND} -E env

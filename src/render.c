@@ -35,6 +35,12 @@ typedef struct HvByteStats {
   uint64_t high_bytes;
 } HvByteStats;
 
+typedef struct HvOpenPathGuard {
+  const struct stat *st;
+  const char *path;
+  const char *role;
+} HvOpenPathGuard;
+
 static void HV_PRINTF_LIKE(3, 4) hv_set_error(char *err, size_t err_size, const char *fmt, ...)
 {
   va_list args;
@@ -307,16 +313,66 @@ static int hv_path_aliases_input(const char *path, const struct stat *input_st)
   return hv_same_inode(&path_st, input_st);
 }
 
+static int hv_output_target_type_allowed(mode_t mode)
+{
+  return S_ISREG(mode) || S_ISCHR(mode);
+}
+
+static int hv_validate_existing_output_target(
+  const char *path,
+  const char *role,
+  char *err,
+  size_t err_size
+)
+{
+  struct stat st;
+  const char *role_text = (role != 0) ? role : "output";
+
+  if (path == 0) {
+    hv_set_error(err, err_size, "missing %s path", role_text);
+    return 0;
+  }
+
+  if (lstat(path, &st) != 0) {
+    if (errno == ENOENT) {
+      return 1;
+    }
+    hv_set_error(err, err_size, "failed to stat %s '%s': %s", role_text, path, strerror(errno));
+    return 0;
+  }
+
+  if (S_ISLNK(st.st_mode)) {
+    hv_set_error(err, err_size, "refusing symlink %s path '%s'", role_text, path);
+    return 0;
+  }
+
+  if (!hv_output_target_type_allowed(st.st_mode)) {
+    hv_set_error(
+      err,
+      err_size,
+      "refusing unsupported %s target type for '%s' (expected regular file or character device)",
+      role_text,
+      path
+    );
+    return 0;
+  }
+
+  return 1;
+}
+
 static int hv_open_checked_output_stream(
   const char *path,
   const char *role,
   const char *input_path,
   const struct stat *input_st,
+  const HvOpenPathGuard *guard,
   FILE **fp_out,
   char *err,
   size_t err_size
 )
 {
+  int open_flags = O_WRONLY | O_CREAT | O_CLOEXEC | O_NONBLOCK;
+  int fd_flags = 0;
   int fd = -1;
   struct stat out_st;
   FILE *fp = 0;
@@ -329,14 +385,38 @@ static int hv_open_checked_output_stream(
   }
   *fp_out = 0;
 
-  fd = open(path, O_WRONLY | O_CREAT | O_CLOEXEC, 0666);
+#ifdef O_NOFOLLOW
+  open_flags |= O_NOFOLLOW;
+#endif
+
+  if (!hv_validate_existing_output_target(path, role_text, err, err_size)) {
+    return 0;
+  }
+
+  fd = open(path, open_flags, 0666);
   if (fd < 0) {
+    if (errno == ELOOP) {
+      hv_set_error(err, err_size, "refusing symlink %s path '%s'", role_text, path);
+      return 0;
+    }
     hv_set_error(err, err_size, "failed to open %s '%s': %s", role_text, path, strerror(errno));
     return 0;
   }
 
   if (fstat(fd, &out_st) != 0) {
     hv_set_error(err, err_size, "failed to stat opened %s '%s': %s", role_text, path, strerror(errno));
+    (void)close(fd);
+    return 0;
+  }
+
+  if (!hv_output_target_type_allowed(out_st.st_mode)) {
+    hv_set_error(
+      err,
+      err_size,
+      "refusing unsupported %s target type for '%s' (expected regular file or character device)",
+      role_text,
+      path
+    );
     (void)close(fd);
     return 0;
   }
@@ -354,8 +434,29 @@ static int hv_open_checked_output_stream(
     return 0;
   }
 
-  if (ftruncate(fd, 0) != 0) {
+  if ((guard != 0) && (guard->st != 0) && hv_same_inode(&out_st, guard->st)) {
+    hv_set_error(
+      err,
+      err_size,
+      "refusing destructive path alias: %s path '%s' aliases open %s path '%s'",
+      role_text,
+      path,
+      (guard->role != 0) ? guard->role : "output",
+      (guard->path != 0) ? guard->path : "(open path)"
+    );
+    (void)close(fd);
+    return 0;
+  }
+
+  if (S_ISREG(out_st.st_mode) && (ftruncate(fd, 0) != 0)) {
     hv_set_error(err, err_size, "failed to truncate %s '%s': %s", role_text, path, strerror(errno));
+    (void)close(fd);
+    return 0;
+  }
+
+  fd_flags = fcntl(fd, F_GETFL);
+  if ((fd_flags < 0) || (fcntl(fd, F_SETFL, fd_flags & ~O_NONBLOCK) != 0)) {
+    hv_set_error(err, err_size, "failed to prepare %s '%s': %s", role_text, path, strerror(errno));
     (void)close(fd);
     return 0;
   }
@@ -877,8 +978,10 @@ int hv_render_file(
 {
   HvInputStream stream;
   struct stat input_st;
+  struct stat legend_st;
   int input_fd = -1;
   FILE *legend_fp = 0;
+  int have_legend_st = 0;
   uint32_t order = 0u;
   uint32_t width = 0u;
   uint32_t height = 0u;
@@ -1003,6 +1106,7 @@ int hv_render_file(
         "legend",
         options->input_path,
         &input_st,
+        0,
         &legend_fp,
         err,
         err_size
@@ -1012,6 +1116,14 @@ int hv_render_file(
       (void)hv_close_input_stream(&stream, 0, 0u);
       return 0;
     }
+    if (fstat(fileno(legend_fp), &legend_st) != 0) {
+      hv_set_error(err, err_size, "failed to stat opened legend '%s': %s", options->legend_path, strerror(errno));
+      (void)fclose(legend_fp);
+      free(pixels);
+      (void)hv_close_input_stream(&stream, 0, 0u);
+      return 0;
+    }
+    have_legend_st = 1;
     if (!hv_write_legend_header(legend_fp, options, stream.total, order, width, height, capacity, page_count)) {
       hv_set_error(err, err_size, "failed to write legend header");
       (void)fclose(legend_fp);
@@ -1092,6 +1204,7 @@ int hv_render_file(
         "output page",
         options->input_path,
         &input_st,
+        have_legend_st ? &(const HvOpenPathGuard){&legend_st, options->legend_path, "legend"} : 0,
         &page_output_fp,
         err,
         err_size

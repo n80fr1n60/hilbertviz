@@ -13,6 +13,8 @@ add_library(hvfuzzcore STATIC ${HV_FUZZ_CORE_SOURCES})
 target_include_directories(hvfuzzcore PUBLIC ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hvfuzzcore PUBLIC hv_warnings hv_config hv_coverage)
 
+set(HV_FUZZ_SMOKE_SEED "${PROJECT_SOURCE_DIR}/fuzz/corpus/seed_mixed.bin")
+
 if(PNG_FOUND)
   target_compile_definitions(hvfuzzcore PRIVATE HV_HAVE_LIBPNG=1)
   target_link_libraries(hvfuzzcore PUBLIC PNG::PNG)
@@ -42,12 +44,50 @@ if(HILBERTVIZ_FUZZ_ENGINE STREQUAL "libfuzzer")
   target_link_libraries(fuzz_file_slice_libfuzzer PRIVATE hvfuzzcore)
   target_compile_options(fuzz_file_slice_libfuzzer PRIVATE -fsanitize=fuzzer${HV_FUZZ_SANITIZE_COMMON} -fno-omit-frame-pointer)
   target_link_options(fuzz_file_slice_libfuzzer PRIVATE -fsanitize=fuzzer${HV_FUZZ_SANITIZE_COMMON})
+
+  add_custom_target(fuzz_smoke
+    COMMAND $<TARGET_FILE:fuzz_pipeline_libfuzzer> -runs=1 ${HV_FUZZ_SMOKE_SEED}
+    COMMAND $<TARGET_FILE:fuzz_file_slice_libfuzzer> -runs=1 ${HV_FUZZ_SMOKE_SEED}
+    DEPENDS fuzz_pipeline_libfuzzer fuzz_file_slice_libfuzzer
+    USES_TERMINAL
+    COMMENT "Run short fuzz smoke checks"
+  )
+
+  if(BUILD_TESTING)
+    add_test(
+      NAME hv_fuzz_pipeline_smoke
+      COMMAND $<TARGET_FILE:fuzz_pipeline_libfuzzer> -runs=1 ${HV_FUZZ_SMOKE_SEED}
+    )
+    add_test(
+      NAME hv_fuzz_file_slice_smoke
+      COMMAND $<TARGET_FILE:fuzz_file_slice_libfuzzer> -runs=1 ${HV_FUZZ_SMOKE_SEED}
+    )
+  endif()
 elseif(HILBERTVIZ_FUZZ_ENGINE STREQUAL "afl")
   add_executable(fuzz_pipeline_afl afl_pipeline.c)
   target_link_libraries(fuzz_pipeline_afl PRIVATE hvfuzzcore)
 
   add_executable(fuzz_file_slice_afl afl_file_slice.c)
   target_link_libraries(fuzz_file_slice_afl PRIVATE hvfuzzcore)
+
+  add_custom_target(fuzz_smoke
+    COMMAND $<TARGET_FILE:fuzz_pipeline_afl> ${HV_FUZZ_SMOKE_SEED}
+    COMMAND $<TARGET_FILE:fuzz_file_slice_afl> ${HV_FUZZ_SMOKE_SEED}
+    DEPENDS fuzz_pipeline_afl fuzz_file_slice_afl
+    USES_TERMINAL
+    COMMENT "Run short fuzz smoke checks"
+  )
+
+  if(BUILD_TESTING)
+    add_test(
+      NAME hv_fuzz_pipeline_smoke
+      COMMAND $<TARGET_FILE:fuzz_pipeline_afl> ${HV_FUZZ_SMOKE_SEED}
+    )
+    add_test(
+      NAME hv_fuzz_file_slice_smoke
+      COMMAND $<TARGET_FILE:fuzz_file_slice_afl> ${HV_FUZZ_SMOKE_SEED}
+    )
+  endif()
 
   add_custom_target(afl_tmux
     COMMAND ${CMAKE_COMMAND} -E chdir ${PROJECT_SOURCE_DIR}

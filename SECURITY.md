@@ -14,12 +14,14 @@ We take the security of `hilbertviz` seriously. If you discover a security vulne
 *   **Bounded Arithmetic**: Critical calculations for buffer sizes, image dimensions, offsets, row sizes, and pixel indexing use overflow-checked helpers (for example: `hv_mul_u64`, `hv_add_u64`, `hv_add_size`).
 *   **Recursion Safety**: The recursive generalized Hilbert (Gilbert) traversal uses divide-and-conquer, carries explicit depth tracking, and enforces a hard maximum recursion depth. This bounds stack usage even for extreme dimensions.
 *   **Memory Caps**: A default memory allocation cap (256MB) prevents Denial-of-Service via large images. This is configurable via `HILBERTVIZ_MAX_IMAGE_BYTES`.
+*   **Bounded Full-Buffer Reads**: `hv_read_file_slice()` applies a default 256MB cap to full-buffer reads. This is configurable via `HILBERTVIZ_MAX_SLICE_BYTES`.
 *   **Safe I/O**: We avoid unsafe C string APIs (e.g., `gets`, `sprintf`) and use bounded formatting (`snprintf`, `vsnprintf`) where formatted strings are required.
 
 ### 2. Path and File System Security
 *   **Destructive Alias Prevention**: The tool uses `fstat` and inode comparison (`st_dev`, `st_ino`) to detect if an output path points to the same physical file as the input, preventing data loss.
 *   **Race Condition Mitigation**: Validation of file properties is performed on open file descriptors to mitigate Time-of-Check Time-of-Use (TOCTOU) vulnerabilities.
 *   **Path Normalization**: `realpath` is used to normalize paths before comparison to prevent directory traversal bypasses.
+*   **Output Target Policy**: Output writers reject symlinks and unsupported special-file targets such as FIFOs and sockets. Regular files and character devices (for example `/dev/null`) remain allowed.
 
 ### 3. Build-Time Protections
 *   **Hardening Flags**: Release builds are compiled with `-fstack-protector-strong`, `-D_FORTIFY_SOURCE=2`, and `-fPIE` (Position Independent Executable) to mitigate exploitation of memory bugs.
