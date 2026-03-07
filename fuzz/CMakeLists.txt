@@ -12,6 +12,7 @@ set(HV_FUZZ_CORE_SOURCES
 add_library(hvfuzzcore STATIC ${HV_FUZZ_CORE_SOURCES})
 target_include_directories(hvfuzzcore PUBLIC ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hvfuzzcore PUBLIC hv_warnings hv_config hv_coverage)
+target_link_libraries(hvfuzzcore PUBLIC m)
 
 set(HV_FUZZ_SMOKE_SEED "${PROJECT_SOURCE_DIR}/fuzz/corpus/seed_mixed.bin")
 

@@ -14,7 +14,8 @@ enum {
   HV_OPT_LAYOUT = 1000,
   HV_OPT_DIMENSIONS,
   HV_OPT_DRY_RUN,
-  HV_OPT_STRICT_ADJACENCY
+  HV_OPT_STRICT_ADJACENCY,
+  HV_OPT_ENTROPY
 };
 
 static void hv_print_usage(const char *prog)
@@ -31,6 +32,7 @@ static void hv_print_usage(const char *prog)
     "  -p, --paginate           Emit multiple pages when input exceeds one image\n"
     "  -g, --legend             Write sidecar legend stats file (default: <output>.legend.txt)\n"
     "  -G, --legend-path <p>    Explicit legend output path\n"
+    "      --entropy            Print slice entropy (bits/byte) to stdout\n"
     "      --layout <name>      Layout: hilbert (default) or rect-hilbert\n"
     "      --dimensions <WxH>   Dimensions for rect-hilbert mode\n"
     "      --strict-adjacency   Reject odd/even parity dimensions that require a diagonal step\n"
@@ -409,6 +411,7 @@ int main(int argc, char **argv)
     {"dimensions", required_argument, 0, HV_OPT_DIMENSIONS},
     {"dry-run", no_argument, 0, HV_OPT_DRY_RUN},
     {"strict-adjacency", no_argument, 0, HV_OPT_STRICT_ADJACENCY},
+    {"entropy", no_argument, 0, HV_OPT_ENTROPY},
     {"help", no_argument, 0, 'h'},
     {0, 0, 0, 0}
   };
@@ -430,6 +433,7 @@ int main(int argc, char **argv)
   uint32_t height = 0u;
   int dry_run = 0;
   int strict_adjacency = 0;
+  int emit_entropy = 0;
   HvRenderOptions options;
   HvRenderResult result;
   char err[512];
@@ -498,6 +502,9 @@ int main(int argc, char **argv)
       case HV_OPT_STRICT_ADJACENCY:
         strict_adjacency = 1;
         break;
+      case HV_OPT_ENTROPY:
+        emit_entropy = 1;
+        break;
       case 'h':
         hv_print_usage(argv[0]);
         return 0;
@@ -554,6 +561,7 @@ int main(int argc, char **argv)
 
   if (dry_run) {
     uint64_t slice_bytes = 0u;
+    double entropy_bits_per_byte = 0.0;
 
     memset(err, 0, sizeof(err));
     if (!hv_compute_slice_bytes(input_path, offset, has_length, length, &slice_bytes, err, sizeof(err))) {
@@ -566,6 +574,15 @@ int main(int argc, char **argv)
       hv_print_rect_dry_run(slice_bytes, width, height, strict_adjacency);
     } else {
       hv_print_hilbert_dry_run(slice_bytes, auto_order, order, paginate);
+    }
+    if (emit_entropy) {
+      memset(err, 0, sizeof(err));
+      if (!hv_compute_slice_entropy(input_path, offset, has_length, length, &entropy_bits_per_byte, err, sizeof(err))) {
+        fprintf(stderr, "Dry run failed: %s\n", err);
+        free(default_legend_path);
+        return 1;
+      }
+      printf("  entropy_bits_per_byte: %.6f\n", entropy_bits_per_byte);
     }
 
     free(default_legend_path);
@@ -642,6 +659,9 @@ int main(int argc, char **argv)
 
   if (legend_enabled && (legend_path != 0)) {
     printf("Wrote legend %s\n", legend_path);
+  }
+  if (emit_entropy) {
+    printf("Entropy: %.6f bits/byte\n", result.entropy_bits_per_byte);
   }
 
   free(default_legend_path);

@@ -11,6 +11,7 @@
 - Optional pagination (`--paginate`) for very large inputs.
 - Optional planning mode (`--dry-run`) to validate fit and print suggestions.
 - Optional legend sidecar file with page and total byte-range stats.
+- Optional `--entropy` reporting for the exact selected slice in bits/byte.
 - Output format dispatch by extension:
   - `.ppm` always supported.
   - `.png` supported when libpng is found at build time.
@@ -122,6 +123,14 @@ Legend sidecar:
 ./build/src/hilbertviz input.bin -o output.ppm --legend-path output.stats.txt
 ```
 
+Entropy for the selected slice:
+
+```bash
+./build/src/hilbertviz input.bin -o output.ppm --entropy
+./build/src/hilbertviz input.bin -o output.ppm --offset 4096 --length 65536 --entropy
+./build/src/hilbertviz input.bin -o output.ppm --dry-run --entropy
+```
+
 Help:
 
 ```bash
@@ -151,6 +160,8 @@ Help:
 - For multi-page output, files are named with `_pageNNNN` suffixes.
 - `--layout hilbert` is canonical square Hilbert (`2^n x 2^n`).
 - `--layout rect-hilbert` is a generalized rectangular Hilbert-like traversal.
+- `--entropy` prints Shannon entropy for the exact rendered slice in bits/byte.
+- Legend output appends `entropy_bits_per_byte=<value>` for the rendered slice.
 
 ## Fuzzing
 

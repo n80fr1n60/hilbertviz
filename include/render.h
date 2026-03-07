@@ -31,11 +31,22 @@ typedef struct HvRenderResult {
   uint64_t capacity;
   uint64_t input_bytes;
   uint64_t page_count;
+  double entropy_bits_per_byte;
 } HvRenderResult;
 
 int hv_render_file(
   const HvRenderOptions *options,
   HvRenderResult *result,
+  char *err,
+  size_t err_size
+);
+
+int hv_compute_slice_entropy(
+  const char *input_path,
+  uint64_t offset,
+  int has_length,
+  uint64_t length,
+  double *entropy_out,
   char *err,
   size_t err_size
 );

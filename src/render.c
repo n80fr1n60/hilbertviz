@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -20,6 +21,7 @@
 #define HV_DEFAULT_PAGE_ORDER 12u
 #define HV_READ_CHUNK_BYTES 65536u
 #define HV_DEFAULT_MAX_IMAGE_BYTES (256ULL * 1024ULL * 1024ULL)
+#define HV_ENTROPY_PRECISION 6
 
 #if defined(__GNUC__) || defined(__clang__)
 #define HV_PRINTF_LIKE(fmt_idx, first_arg_idx) __attribute__((format(printf, fmt_idx, first_arg_idx)))
@@ -636,6 +638,39 @@ static void hv_stats_add_byte(HvByteStats *stats, uint8_t value)
   }
 }
 
+static void hv_histogram_add_byte(uint64_t histogram[256], uint8_t value)
+{
+  if (histogram == 0) {
+    return;
+  }
+  ++histogram[(size_t)value];
+}
+
+static double hv_entropy_from_histogram(const uint64_t histogram[256], uint64_t total_bytes)
+{
+  double entropy = 0.0;
+  double log2_denom = 0.0;
+  size_t i = 0u;
+
+  if ((histogram == 0) || (total_bytes == 0u)) {
+    return 0.0;
+  }
+
+  log2_denom = log(2.0);
+  if (log2_denom == 0.0) {
+    return 0.0;
+  }
+
+  for (i = 0u; i < 256u; ++i) {
+    if (histogram[i] != 0u) {
+      double probability = (double)histogram[i] / (double)total_bytes;
+      entropy -= probability * (log(probability) / log2_denom);
+    }
+  }
+
+  return entropy;
+}
+
 static void hv_stats_add(HvByteStats *dst, const HvByteStats *src)
 {
   if ((dst == 0) || (src == 0)) {
@@ -969,6 +1004,70 @@ static int hv_write_legend_total(FILE *legend_fp, const HvByteStats *total_stats
   return 1;
 }
 
+static int hv_write_legend_entropy(FILE *legend_fp, double entropy_bits_per_byte)
+{
+  if (legend_fp == 0) {
+    return 0;
+  }
+  if (fprintf(legend_fp, "entropy_bits_per_byte=%.*f\n", HV_ENTROPY_PRECISION, entropy_bits_per_byte) < 0) {
+    return 0;
+  }
+  return 1;
+}
+
+int hv_compute_slice_entropy(
+  const char *input_path,
+  uint64_t offset,
+  int has_length,
+  uint64_t length,
+  double *entropy_out,
+  char *err,
+  size_t err_size
+)
+{
+  HvInputStream stream;
+  uint8_t read_buf[HV_READ_CHUNK_BYTES];
+  uint64_t histogram[256];
+
+  if (entropy_out == 0) {
+    hv_set_error(err, err_size, "invalid arguments for entropy computation");
+    return 0;
+  }
+
+  *entropy_out = 0.0;
+  memset(&stream, 0, sizeof(stream));
+  memset(histogram, 0, sizeof(histogram));
+
+  if (!hv_open_file_slice_stream(input_path, offset, has_length, length, &stream, err, err_size)) {
+    return 0;
+  }
+
+  while (stream.remaining > 0u) {
+    size_t chunk = HV_READ_CHUNK_BYTES;
+    size_t i = 0u;
+
+    if (stream.remaining < (uint64_t)chunk) {
+      chunk = (size_t)stream.remaining;
+    }
+
+    if (!hv_stream_read_exact(&stream, read_buf, chunk, err, err_size)) {
+      (void)hv_close_input_stream(&stream, 0, 0u);
+      return 0;
+    }
+
+    for (i = 0u; i < chunk; ++i) {
+      hv_histogram_add_byte(histogram, read_buf[i]);
+    }
+  }
+
+  *entropy_out = hv_entropy_from_histogram(histogram, stream.total);
+  if (!hv_close_input_stream(&stream, err, err_size)) {
+    return 0;
+  }
+
+  return 1;
+}
+
 int hv_render_file(
   const HvRenderOptions *options,
   HvRenderResult *result,
@@ -995,9 +1094,11 @@ int hv_render_file(
   uint64_t page_index = 0u;
   uint8_t read_buf[HV_READ_CHUNK_BYTES];
   HvByteStats total_stats;
+  uint64_t histogram[256];
 
   memset(&stream, 0, sizeof(stream));
   memset(&total_stats, 0, sizeof(total_stats));
+  memset(histogram, 0, sizeof(histogram));
 
   if (
     (options == 0) || (options->input_path == 0) || (options->output_path == 0) || (result == 0)
@@ -1011,6 +1112,7 @@ int hv_render_file(
   result->capacity = 0u;
   result->input_bytes = 0u;
   result->page_count = 0u;
+  result->entropy_bits_per_byte = 0.0;
 
   if (
     !hv_open_file_slice_stream(
@@ -1169,6 +1271,7 @@ int hv_render_file(
       for (i = 0u; i < chunk; ++i, ++d) {
         uint8_t value = read_buf[i];
         hv_stats_add_byte(&page_stats, value);
+        hv_histogram_add_byte(histogram, value);
         if (!hv_paint_byte(pixels, pixel_bytes_u64, options->layout, order, width, height, d, value, err, err_size)) {
           if (legend_fp != 0) {
             (void)fclose(legend_fp);
@@ -1259,6 +1362,13 @@ int hv_render_file(
       (void)hv_close_input_stream(&stream, 0, 0u);
       return 0;
     }
+    if (!hv_write_legend_entropy(legend_fp, hv_entropy_from_histogram(histogram, total_stats.total_bytes))) {
+      hv_set_error(err, err_size, "failed while writing legend entropy");
+      (void)fclose(legend_fp);
+      free(pixels);
+      (void)hv_close_input_stream(&stream, 0, 0u);
+      return 0;
+    }
     if (fclose(legend_fp) != 0) {
       hv_set_error(err, err_size, "failed to close legend output");
       free(pixels);
@@ -1278,6 +1388,7 @@ int hv_render_file(
   result->capacity = capacity;
   result->input_bytes = total_stats.total_bytes;
   result->page_count = page_count;
+  result->entropy_bits_per_byte = hv_entropy_from_histogram(histogram, total_stats.total_bytes);
 
   free(pixels);
   return 1;

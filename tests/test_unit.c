@@ -82,6 +82,11 @@ static void test_restore_env(const char *name, char *saved_value)
   }
 }
 
+static double test_abs_double(double value)
+{
+  return (value < 0.0) ? -value : value;
+}
+
 static void test_hilbert_order_helpers(void)
 {
   uint32_t side = 0u;
@@ -800,6 +805,106 @@ static void test_render_output_char_device_succeeds(void)
   TEST_CHECK(result.input_bytes == (uint64_t)sizeof(payload));
 
   TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_entropy_single_symbol_zero(void)
+{
+  char input_template[] = "/tmp/hv_entropy_zero_input_XXXXXX";
+  uint8_t payload[] = {0xAAu, 0xAAu, 0xAAu, 0xAAu};
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  double entropy = -1.0;
+  char err[256];
+
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_compute_slice_entropy(input_template, 0u, 0, 0u, &entropy, err, sizeof(err)));
+  TEST_CHECK(test_abs_double(entropy - 0.0) < 1e-9);
+
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_entropy_balanced_two_symbol_slice(void)
+{
+  char input_template[] = "/tmp/hv_entropy_slice_input_XXXXXX";
+  uint8_t payload[] = {0x10u, 0x10u, 0x10u, 0x10u, 0x00u, 0xFFu, 0x00u, 0xFFu};
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  double entropy = -1.0;
+  char err[256];
+
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_compute_slice_entropy(input_template, 4u, 1, 4u, &entropy, err, sizeof(err)));
+  TEST_CHECK(test_abs_double(entropy - 1.0) < 1e-9);
+
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_render_entropy_and_legend_key(void)
+{
+  char input_template[] = "/tmp/hv_entropy_render_input_XXXXXX";
+  char output_template[] = "/tmp/hv_entropy_render_output_XXXXXX";
+  char legend_path[160];
+  uint8_t payload[] = {0x00u, 0xFFu, 0x00u, 0xFFu};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+  FILE *legend_fp = 0;
+  char legend_buf[1024];
+  size_t legend_n = 0u;
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  TEST_CHECK(snprintf(legend_path, sizeof(legend_path), "%s.legend.txt", output_template) > 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.legend_enabled = 1;
+  options.legend_path = legend_path;
+  options.auto_order = 1;
+
+  TEST_CHECK(hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(test_abs_double(result.entropy_bits_per_byte - 1.0) < 1e-9);
+
+  legend_fp = fopen(legend_path, "rb");
+  TEST_CHECK(legend_fp != 0);
+  legend_n = fread(legend_buf, 1u, sizeof(legend_buf) - 1u, legend_fp);
+  TEST_CHECK(legend_n > 0u);
+  legend_buf[legend_n] = '\0';
+  TEST_CHECK(strstr(legend_buf, "entropy_bits_per_byte=1.000000") != 0);
+  TEST_CHECK(fclose(legend_fp) == 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+  TEST_CHECK(unlink(legend_path) == 0);
 }
 
 static void test_render_missing_input_reports_open_error(void)
@@ -2508,6 +2613,9 @@ int main(void)
   test_render_rect_hilbert_strict_rejects_flipped_parity();
   test_render_respects_max_image_cap();
   test_render_output_char_device_succeeds();
+  test_entropy_single_symbol_zero();
+  test_entropy_balanced_two_symbol_slice();
+  test_render_entropy_and_legend_key();
   test_render_missing_input_reports_open_error();
   test_render_auto_paginate_small_uses_auto_order();
   test_render_auto_paginate_large_uses_default_page_order();

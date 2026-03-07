@@ -101,6 +101,24 @@ add_test(
 )
 
 add_test(
+  NAME hv_cli_entropy_stdout
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_entropy.bin'; out_path='${CMAKE_BINARY_DIR}/cli_entropy.ppm'; rm -f \"$input\" \"$out_path\"; printf '\\000\\377\\000\\377' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz> \"$input\" -o \"$out_path\" --entropy 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\" \"$out_path\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Entropy: 1.000000 bits/byte'"
+)
+
+add_test(
+  NAME hv_cli_entropy_dry_run_stdout
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_entropy_dry.bin'; rm -f \"$input\"; printf '\\000\\377\\000\\377' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz> \"$input\" -o ${CMAKE_BINARY_DIR}/cli_entropy_dry.ppm --entropy --dry-run 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'entropy_bits_per_byte: 1.000000'"
+)
+
+add_test(
   NAME hv_cli_rect_render_success
   COMMAND
     ${CMAKE_COMMAND} -E env
