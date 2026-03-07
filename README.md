@@ -36,6 +36,13 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHILBERTVIZ_WITH_PNG=OFF
 cmake --build build -j
 ```
 
+Disable SDL2/OpenGL 3D viewer dependency detection:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHILBERTVIZ_WITH_3D_VIEWER=OFF
+cmake --build build -j
+```
+
 With sanitizers:
 
 ```bash
@@ -140,6 +147,11 @@ Experimental 3D scaffold:
 ./build/src/hilbertviz3d --help
 ```
 
+Notes:
+
+- `hilbertviz3d` keeps a non-interactive fallback path even when SDL2/OpenGL viewer dependencies are unavailable or disabled.
+- `HILBERTVIZ_WITH_3D_VIEWER=ON` (default) enables SDL2/OpenGL dependency discovery for the upcoming interactive viewer work.
+
 Help:
 
 ```bash
@@ -170,6 +182,7 @@ Help:
 - `--layout hilbert` is canonical square Hilbert (`2^n x 2^n`).
 - `--layout rect-hilbert` is a generalized rectangular Hilbert-like traversal.
 - `hilbertviz3d` currently builds a normalized colored 3D point cloud and prints a summary; interactive rendering is deferred.
+- SDL2/OpenGL viewer dependency detection is optional and controlled by `HILBERTVIZ_WITH_3D_VIEWER`.
 - `--entropy` prints Shannon entropy for the exact rendered slice in bits/byte.
 - Legend output appends `entropy_bits_per_byte=<value>` for the rendered slice.
 

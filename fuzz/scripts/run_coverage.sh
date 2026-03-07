@@ -128,6 +128,7 @@ emit_gcov_summaries() {
   shopt -s nullglob
   app_gcno=(
     "${BUILD_PATH}"/src/CMakeFiles/hvcore.dir/*.gcno
+    "${BUILD_PATH}"/src/CMakeFiles/hv3dapp.dir/*.gcno
     "${BUILD_PATH}"/src/CMakeFiles/hilbertviz.dir/main.c.gcno
     "${BUILD_PATH}"/src/CMakeFiles/hilbertviz3d.dir/main_3d.c.gcno
   )

@@ -21,5 +21,21 @@ endif()
 add_executable(hilbertviz main.c)
 target_link_libraries(hilbertviz PRIVATE hvcore)
 
+add_library(hv3dapp STATIC
+  3d_app.c
+  3d_camera.c
+  3d_platform.c
+  3d_renderer.c
+)
+target_include_directories(hv3dapp PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(hv3dapp PUBLIC hvcore)
+target_link_libraries(hv3dapp PRIVATE hv_warnings hv_config hv_hardening hv_sanitizers hv_coverage hv_3d_viewer_deps)
+if(HILBERTVIZ_WITH_3D_VIEWER)
+  target_compile_definitions(hv3dapp PRIVATE HV_3D_VIEWER_REQUESTED=1)
+endif()
+if(HILBERTVIZ_3D_VIEWER_AVAILABLE)
+  target_compile_definitions(hv3dapp PRIVATE HV_3D_VIEWER_AVAILABLE=1)
+endif()
+
 add_executable(hilbertviz3d main_3d.c)
-target_link_libraries(hilbertviz3d PRIVATE hvcore)
+target_link_libraries(hilbertviz3d PRIVATE hv3dapp)

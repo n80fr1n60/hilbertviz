@@ -1,3 +1,5 @@
+#include "3d_camera.h"
+#include "3d_renderer.h"
 #include "file_io.h"
 #include "hilbert.h"
 #include "hilbert3d.h"
@@ -92,6 +94,76 @@ static double test_abs_double(double value)
 static double test_normalized_axis(uint32_t coord, uint32_t side)
 {
   return ((((double)coord + 0.5) / (double)side) * 2.0) - 1.0;
+}
+
+static void test_3d_camera_defaults(void)
+{
+  Hv3DCamera camera;
+
+  memset(&camera, 0, sizeof(camera));
+  hv_3d_camera_init_defaults(&camera);
+
+  TEST_CHECK(test_abs_double((double)camera.yaw_degrees - 35.0) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.pitch_degrees - 25.0) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.distance - 3.0) < 1e-6);
+  TEST_CHECK(camera.viewport_width == 1280u);
+  TEST_CHECK(camera.viewport_height == 720u);
+}
+
+static void test_3d_renderer_summary_output(void)
+{
+  HvPoint3D points[2];
+  HvPointCloud3D cloud;
+  Hv3DCamera camera;
+  FILE *fp = 0;
+  char err[256];
+  char buf[512];
+  size_t n = 0u;
+
+  memset(points, 0, sizeof(points));
+  memset(&cloud, 0, sizeof(cloud));
+  memset(&camera, 0, sizeof(camera));
+  memset(err, 0, sizeof(err));
+  memset(buf, 0, sizeof(buf));
+
+  hv_3d_camera_init_defaults(&camera);
+
+  points[0].x = -0.5f;
+  points[0].y = -0.5f;
+  points[0].z = -0.5f;
+  points[0].r = 0u;
+  points[0].g = 0u;
+  points[0].b = 0u;
+
+  points[1].x = -0.5f;
+  points[1].y = -0.5f;
+  points[1].z = 0.5f;
+  points[1].r = 255u;
+  points[1].g = 0u;
+  points[1].b = 0u;
+
+  cloud.points = points;
+  cloud.count = 2u;
+  cloud.order = 1u;
+  cloud.side = 2u;
+  cloud.capacity = 8u;
+
+  TEST_CHECK(!hv_3d_renderer_write_point_cloud_summary(0, &cloud, &camera, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments") != 0);
+
+  memset(err, 0, sizeof(err));
+  fp = tmpfile();
+  TEST_CHECK(fp != 0);
+  TEST_CHECK(hv_3d_renderer_write_point_cloud_summary(fp, &cloud, &camera, err, sizeof(err)));
+  TEST_CHECK(fflush(fp) == 0);
+  TEST_CHECK(fseek(fp, 0L, SEEK_SET) == 0);
+  n = fread(buf, 1u, sizeof(buf) - 1u, fp);
+  TEST_CHECK(ferror(fp) == 0);
+  buf[n] = '\0';
+  TEST_CHECK(strstr(buf, "Loaded point cloud: points=2 order=1 side=2 capacity=8") != 0);
+  TEST_CHECK(strstr(buf, "First point: -0.500000 -0.500000 -0.500000 rgb=0,0,0") != 0);
+  TEST_CHECK(strstr(buf, "Last point: -0.500000 -0.500000 0.500000 rgb=255,0,0") != 0);
+  TEST_CHECK(fclose(fp) == 0);
 }
 
 static void test_hilbert_order_helpers(void)
@@ -2879,6 +2951,8 @@ int main(void)
   test_hilbert3d_order_helpers();
   test_hilbert3d_d2xyz_order1();
   test_hilbert3d_bijection_and_adjacency();
+  test_3d_camera_defaults();
+  test_3d_renderer_summary_output();
   test_point_cloud3d_empty_slice();
   test_point_cloud3d_small_deterministic();
   test_point_cloud3d_near_capacity_slice();

@@ -1,11 +1,19 @@
 add_executable(test_hv test_unit.c)
-target_include_directories(test_hv PRIVATE ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(test_hv PRIVATE hvcore hv_warnings hv_config hv_sanitizers hv_coverage)
+target_include_directories(test_hv PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_hv PRIVATE hvcore hv3dapp hv_warnings hv_config hv_sanitizers hv_coverage)
 if(PNG_FOUND)
   target_compile_definitions(test_hv PRIVATE HV_TEST_HAVE_PNG=1)
 endif()
 
 add_test(NAME hv_unit COMMAND test_hv)
+
+if(HILBERTVIZ_3D_VIEWER_AVAILABLE)
+  set(HV_3D_VIEWER_HELP_EXPECTED "Interactive viewer support: available (SDL2/OpenGL detected; render loop not wired yet)")
+elseif(HILBERTVIZ_WITH_3D_VIEWER)
+  set(HV_3D_VIEWER_HELP_EXPECTED "Interactive viewer support: unavailable (SDL2/OpenGL development packages not found)")
+else()
+  set(HV_3D_VIEWER_HELP_EXPECTED "Interactive viewer support: disabled at build time")
+endif()
 
 add_test(
   NAME hv_cli_3d_help
@@ -13,7 +21,7 @@ add_test(
     ${CMAKE_COMMAND} -E env
       bash
       -lc
-      "out=\"$($<TARGET_FILE:hilbertviz3d> --help 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Supported order range: 1..7'"
+      "out=\"$($<TARGET_FILE:hilbertviz3d> --help 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Supported order range: 1..7' && printf '%s' \"$out\" | grep -Fq '${HV_3D_VIEWER_HELP_EXPECTED}'"
 )
 
 add_test(
@@ -23,6 +31,15 @@ add_test(
       bash
       -lc
       "input='${CMAKE_BINARY_DIR}/cli_3d_summary.bin'; rm -f \"$input\"; printf '\\000\\377' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --order 1 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Loaded point cloud: points=2 order=1 side=2 capacity=8' && printf '%s' \"$out\" | grep -Fq 'First point: -0.500000 -0.500000 -0.500000 rgb=0,0,0' && printf '%s' \"$out\" | grep -Fq 'Last point: -0.500000 -0.500000 0.500000 rgb=255,0,0'"
+)
+
+add_test(
+  NAME hv_3d_viewer_option_off_fallback
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "build_dir='${CMAKE_BINARY_DIR}/viewer_off_smoke'; rm -rf \"$build_dir\"; cmake -S '${PROJECT_SOURCE_DIR}' -B \"$build_dir\" -DBUILD_TESTING=OFF -DHILBERTVIZ_WITH_3D_VIEWER=OFF >/dev/null && cmake --build \"$build_dir\" --target hilbertviz3d -j1 >/dev/null && out=\"$(\"$build_dir\"/src/hilbertviz3d --help 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Interactive viewer support: disabled at build time'"
 )
 
 add_test(
