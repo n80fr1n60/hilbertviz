@@ -225,6 +225,19 @@ Coverage helper script (separate non-fuzz build directory):
 `run_coverage.sh` only accepts `BUILD_DIR` names beginning with `build-coverage`
 and contained under this repository root (no absolute or `..` paths).
 
+By default it also builds the AFL-style fuzz binaries in normal compiler mode so
+the short smoke tests run under `ctest`. Disable that with:
+
+```bash
+RUN_FUZZ_SMOKE=0 ./fuzz/scripts/run_coverage.sh
+```
+
+Additional outputs from `run_coverage.sh` when `gcov`, `jq`, and `gzip` are
+available:
+
+- `build-coverage*/app-coverage-summary.json`
+- `build-coverage*/fuzz-target-coverage-summary.json` (when fuzz targets are built)
+
 Use AFL corpus for coverage replay:
 
 ```bash

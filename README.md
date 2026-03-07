@@ -307,6 +307,23 @@ One-command coverage runner (separate build dir, safe with active AFL builds):
 `run_coverage.sh` only accepts `BUILD_DIR` names that start with `build-coverage`
 and stay under this repository root (no absolute paths or `..` traversal).
 
+Notes:
+
+- `run_coverage.sh` uses the GCC/gcov coverage lane by default. Prefer this on
+  this machine when the clang 20 runtime/profile setup is unavailable.
+- By default it also builds the AFL-style fuzz binaries in normal compiler mode
+  so the short fuzz smoke tests run under `ctest`.
+- Disable fuzz smoke during coverage runs with:
+
+```bash
+RUN_FUZZ_SMOKE=0 ./fuzz/scripts/run_coverage.sh
+```
+
+When `gcov`, `jq`, and `gzip` are available, `run_coverage.sh` also writes:
+
+- `build-coverage*/app-coverage-summary.json`
+- `build-coverage*/fuzz-target-coverage-summary.json` (when fuzz smoke/corpus is enabled)
+
 Clang 20 source-based coverage (`llvm-profdata` + `llvm-cov`):
 
 ```bash
