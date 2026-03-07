@@ -107,8 +107,52 @@ static void test_3d_camera_defaults(void)
   TEST_CHECK(test_abs_double((double)camera.yaw_degrees - 35.0) < 1e-6);
   TEST_CHECK(test_abs_double((double)camera.pitch_degrees - 25.0) < 1e-6);
   TEST_CHECK(test_abs_double((double)camera.distance - 3.0) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.target_x) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.target_y) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.target_z) < 1e-6);
   TEST_CHECK(camera.viewport_width == 1280u);
   TEST_CHECK(camera.viewport_height == 720u);
+}
+
+static void test_3d_camera_fit_cloud_small(void)
+{
+  Hv3DCamera camera;
+  HvPointCloud3D cloud;
+
+  memset(&camera, 0, sizeof(camera));
+  memset(&cloud, 0, sizeof(cloud));
+
+  hv_3d_camera_init_defaults(&camera);
+  cloud.count = 4u;
+  cloud.bounds.center_x = -0.5f;
+  cloud.bounds.center_y = 0.0f;
+  cloud.bounds.center_z = 0.0f;
+  cloud.bounds.radius = 0.70710677f;
+
+  TEST_CHECK(hv_3d_camera_fit_cloud(&camera, &cloud));
+  TEST_CHECK(test_abs_double((double)camera.target_x - -0.5) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.target_y) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.target_z) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.distance - 1.5) < 1e-6);
+}
+
+static void test_3d_camera_fit_cloud_large(void)
+{
+  Hv3DCamera camera;
+  HvPointCloud3D cloud;
+
+  memset(&camera, 0, sizeof(camera));
+  memset(&cloud, 0, sizeof(cloud));
+
+  hv_3d_camera_init_defaults(&camera);
+  cloud.count = 512u;
+  cloud.bounds.radius = 1.51554441f;
+
+  TEST_CHECK(hv_3d_camera_fit_cloud(&camera, &cloud));
+  TEST_CHECK(test_abs_double((double)camera.target_x) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.target_y) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.target_z) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.distance - 2.52590728) < 1e-5);
 }
 
 static void test_3d_renderer_summary_output(void)
@@ -171,27 +215,62 @@ static void test_3d_renderer_invalid_arguments(void)
 {
   Hv3DRenderer renderer;
   Hv3DCamera camera;
+  HvPointCloud3D cloud;
   char err[256];
 
   memset(&renderer, 0, sizeof(renderer));
   memset(&camera, 0, sizeof(camera));
+  memset(&cloud, 0, sizeof(cloud));
   memset(err, 0, sizeof(err));
 
+  TEST_CHECK(!hv_3d_renderer_validate_point_size(0.0f, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid 3D point size") != 0);
+
+  memset(err, 0, sizeof(err));
   TEST_CHECK(!hv_3d_renderer_init(0, 0, err, sizeof(err)));
   TEST_CHECK(strstr(err, "invalid arguments") != 0);
 
   memset(err, 0, sizeof(err));
-  TEST_CHECK(!hv_3d_renderer_draw(0, &camera, 640u, 480u, err, sizeof(err)));
+  TEST_CHECK(!hv_3d_renderer_draw(0, &camera, 640u, 480u, HV_3D_POINT_SIZE_DEFAULT, err, sizeof(err)));
   TEST_CHECK(strstr(err, "invalid arguments") != 0);
+
+  memset(err, 0, sizeof(err));
+  if (!hv_3d_renderer_init(&renderer, &cloud, err, sizeof(err))) {
+    TEST_CHECK(
+      (strstr(err, "required OpenGL buffer functions are unavailable") != 0) ||
+      (strstr(err, "3D renderer is unavailable in this build") != 0)
+    );
+  }
+  hv_3d_renderer_shutdown(&renderer);
 }
 
 static void test_3d_platform_invalid_arguments(void)
 {
+  HvPointCloud3D cloud;
+  Hv3DCamera camera;
+  char *saved_hidden = 0;
+  char *saved_frames = 0;
   char err[256];
 
+  memset(&cloud, 0, sizeof(cloud));
+  memset(&camera, 0, sizeof(camera));
   memset(err, 0, sizeof(err));
-  TEST_CHECK(!hv_3d_platform_render_static_cloud(0, 0, err, sizeof(err)));
+  TEST_CHECK(!hv_3d_platform_render_static_cloud(0, 0, HV_3D_POINT_SIZE_DEFAULT, err, sizeof(err)));
   TEST_CHECK(strstr(err, "invalid arguments") != 0);
+
+  (void)hv_3d_platform_viewer_requested();
+
+  saved_hidden = test_save_env("HILBERTVIZ3D_WINDOW_HIDDEN");
+  saved_frames = test_save_env("HILBERTVIZ3D_RENDER_FRAMES");
+  TEST_CHECK(setenv("HILBERTVIZ3D_WINDOW_HIDDEN", "1", 1) == 0);
+  TEST_CHECK(setenv("HILBERTVIZ3D_RENDER_FRAMES", "bad", 1) == 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_3d_platform_render_static_cloud(&cloud, &camera, HV_3D_POINT_SIZE_DEFAULT, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid HILBERTVIZ3D_RENDER_FRAMES='bad'") != 0);
+
+  test_restore_env("HILBERTVIZ3D_WINDOW_HIDDEN", saved_hidden);
+  test_restore_env("HILBERTVIZ3D_RENDER_FRAMES", saved_frames);
 }
 
 static void test_hilbert_order_helpers(void)
@@ -465,6 +544,10 @@ static void test_point_cloud3d_empty_slice(void)
   TEST_CHECK(cloud.order == 1u);
   TEST_CHECK(cloud.side == 2u);
   TEST_CHECK(cloud.capacity == 8u);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.radius) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_x) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_y) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_z) < 1e-6);
 
   hv_free_point_cloud3d(&cloud);
   TEST_CHECK(unlink(input_template) == 0);
@@ -507,6 +590,16 @@ static void test_point_cloud3d_small_deterministic(void)
   TEST_CHECK(cloud.order == 1u);
   TEST_CHECK(cloud.side == 2u);
   TEST_CHECK(cloud.capacity == 8u);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.min_x - -0.5) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.max_x - -0.5) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.min_y - -0.5) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.max_y - 0.5) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.min_z - -0.5) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.max_z - 0.5) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_x - -0.5) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_y) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_z) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.radius - 0.70710678) < 1e-6);
 
   for (i = 0u; i < cloud.count; ++i) {
     TEST_CHECK(test_abs_double((double)cloud.points[i].x - test_normalized_axis(expected_xyz[i][0], 2u)) < 1e-6);
@@ -557,6 +650,10 @@ static void test_point_cloud3d_near_capacity_slice(void)
   TEST_CHECK(cloud.count == payload_size);
   TEST_CHECK(cloud.side == 8u);
   TEST_CHECK(cloud.capacity == capacity);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_x) < 0.2);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_y) < 0.2);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_z) < 0.2);
+  TEST_CHECK((double)cloud.bounds.radius > 1.4);
 
   last_d = capacity - 2u;
   TEST_CHECK(hv_hilbert3d_d2xyz(order, last_d, &last_x, &last_y, &last_z));
@@ -602,9 +699,25 @@ static void test_point_cloud3d_offset_and_length(void)
   TEST_CHECK(cloud.points[1].r == 255u);
   TEST_CHECK(cloud.points[1].g == 0u);
   TEST_CHECK(cloud.points[1].b == 0u);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_x - -0.5) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_y - -0.5) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.center_z) < 1e-6);
+  TEST_CHECK(test_abs_double((double)cloud.bounds.radius - 0.5) < 1e-6);
 
   hv_free_point_cloud3d(&cloud);
   TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_point_cloud3d_invalid_arguments(void)
+{
+  HvPointCloud3D cloud;
+  char err[256];
+
+  memset(&cloud, 0, sizeof(cloud));
+  memset(err, 0, sizeof(err));
+
+  TEST_CHECK(!hv_build_point_cloud3d(0, 1u, 0u, 0, 0u, &cloud, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for 3D point cloud build") != 0);
 }
 
 static void test_palette_edges(void)
@@ -2980,6 +3093,8 @@ int main(void)
   test_hilbert3d_d2xyz_order1();
   test_hilbert3d_bijection_and_adjacency();
   test_3d_camera_defaults();
+  test_3d_camera_fit_cloud_small();
+  test_3d_camera_fit_cloud_large();
   test_3d_renderer_summary_output();
   test_3d_renderer_invalid_arguments();
   test_3d_platform_invalid_arguments();
@@ -2987,6 +3102,7 @@ int main(void)
   test_point_cloud3d_small_deterministic();
   test_point_cloud3d_near_capacity_slice();
   test_point_cloud3d_offset_and_length();
+  test_point_cloud3d_invalid_arguments();
   test_palette_edges();
   test_image_api_dispatch_and_errors();
   test_ppm_writer_wrapper_and_error_paths();

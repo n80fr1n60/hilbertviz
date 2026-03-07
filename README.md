@@ -8,6 +8,7 @@
 - Auto-sized Hilbert grid (`2^order x 2^order`) or manual `--order`.
 - Optional rectangular generalized traversal (`--layout rect-hilbert --dimensions WxH`).
 - Experimental `hilbertviz3d` point-cloud pipeline for selected file slices.
+- Static 3D viewer auto-fits the initial camera to occupied cloud bounds.
 - Optional `--offset` / `--length` slicing for large files.
 - Optional pagination (`--paginate`) for very large inputs.
 - Optional planning mode (`--dry-run`) to validate fit and print suggestions.
@@ -165,12 +166,14 @@ Experimental 3D scaffold:
 ```bash
 ./build/src/hilbertviz3d input.bin --order 5
 ./build/src/hilbertviz3d input.bin --order 5 --offset 4096 --length 65536
+./build/src/hilbertviz3d input.bin --order 5 --point-size 4
 ./build/src/hilbertviz3d --help
 ```
 
 Notes:
 
 - `hilbertviz3d` opens a static 3D point viewer when SDL2/OpenGL support is available.
+- `hilbertviz3d` fits the initial view to the occupied point-cloud bounds.
 - `hilbertviz3d` keeps a non-interactive fallback path when SDL2/OpenGL viewer dependencies are unavailable or disabled.
 - `HILBERTVIZ_WITH_3D_VIEWER=ON` (default) enables SDL2/OpenGL dependency discovery for the upcoming interactive viewer work.
 
@@ -203,7 +206,8 @@ Help:
 - For multi-page output, files are named with `_pageNNNN` suffixes.
 - `--layout hilbert` is canonical square Hilbert (`2^n x 2^n`).
 - `--layout rect-hilbert` is a generalized rectangular Hilbert-like traversal.
-- `hilbertviz3d` currently opens a static SDL/OpenGL point viewer after building the normalized colored 3D point cloud and printing a summary; interactive controls are deferred.
+- `hilbertviz3d` currently opens a static SDL/OpenGL point viewer after building the normalized colored 3D point cloud, fitting the initial camera to the occupied bounds, and printing a summary; interactive controls are deferred.
+- `--point-size <pixels>` controls rendered point size for `hilbertviz3d`.
 - SDL2/OpenGL viewer dependency detection is optional and controlled by `HILBERTVIZ_WITH_3D_VIEWER`.
 - `--entropy` prints Shannon entropy for the exact rendered slice in bits/byte.
 - Legend output appends `entropy_bits_per_byte=<value>` for the rendered slice.

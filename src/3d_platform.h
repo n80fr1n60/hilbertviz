@@ -12,6 +12,7 @@ const char *hv_3d_platform_viewer_support_text(void);
 int hv_3d_platform_render_static_cloud(
   const HvPointCloud3D *cloud,
   const Hv3DCamera *camera,
+  float point_size,
   char *err,
   size_t err_size
 );

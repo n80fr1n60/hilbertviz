@@ -121,6 +121,7 @@ static int hv_parse_u32_env(const char *name, uint32_t *out, char *err, size_t e
 int hv_3d_platform_render_static_cloud(
   const HvPointCloud3D *cloud,
   const Hv3DCamera *camera,
+  float point_size,
   char *err,
   size_t err_size
 )
@@ -143,6 +144,9 @@ int hv_3d_platform_render_static_cloud(
 
   if ((cloud == 0) || (camera == 0)) {
     hv_set_error(err, err_size, "invalid arguments for 3D platform render");
+    return 0;
+  }
+  if (!hv_3d_renderer_validate_point_size(point_size, err, err_size)) {
     return 0;
   }
   if (!hv_3d_platform_viewer_available()) {
@@ -245,7 +249,7 @@ int hv_3d_platform_render_static_cloud(
       window_height = camera->viewport_height;
     }
 
-    if (!hv_3d_renderer_draw(&renderer, camera, window_width, window_height, err, err_size)) {
+    if (!hv_3d_renderer_draw(&renderer, camera, window_width, window_height, point_size, err, err_size)) {
       hv_3d_renderer_shutdown(&renderer);
       SDL_GL_DeleteContext(context);
       SDL_DestroyWindow(window);
@@ -271,6 +275,9 @@ int hv_3d_platform_render_static_cloud(
 
   return 1;
 #else
+  if (!hv_3d_renderer_validate_point_size(point_size, err, err_size)) {
+    return 0;
+  }
   if ((cloud == 0) || (camera == 0)) {
     hv_set_error(err, err_size, "invalid arguments for 3D platform render");
     return 0;

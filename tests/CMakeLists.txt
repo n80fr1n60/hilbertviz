@@ -21,7 +21,7 @@ add_test(
     ${CMAKE_COMMAND} -E env
       bash
       -lc
-      "out=\"$($<TARGET_FILE:hilbertviz3d> --help 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Supported order range: 1..7' && printf '%s' \"$out\" | grep -Fq '${HV_3D_VIEWER_HELP_EXPECTED}'"
+      "out=\"$($<TARGET_FILE:hilbertviz3d> --help 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Supported order range: 1..7' && printf '%s' \"$out\" | grep -Fq -- '--point-size <pixels>' && printf '%s' \"$out\" | grep -Fq '${HV_3D_VIEWER_HELP_EXPECTED}'"
 )
 
 add_test(
@@ -31,7 +31,16 @@ add_test(
       HILBERTVIZ3D_SKIP_VIEWER=1
       bash
       -lc
-      "input='${CMAKE_BINARY_DIR}/cli_3d_summary.bin'; rm -f \"$input\"; printf '\\000\\377' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --order 1 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Loaded point cloud: points=2 order=1 side=2 capacity=8' && printf '%s' \"$out\" | grep -Fq 'First point: -0.500000 -0.500000 -0.500000 rgb=0,0,0' && printf '%s' \"$out\" | grep -Fq 'Last point: -0.500000 -0.500000 0.500000 rgb=255,0,0'"
+      "input='${CMAKE_BINARY_DIR}/cli_3d_summary.bin'; rm -f \"$input\"; printf '\\000\\377' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --order 1 --point-size 5 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Loaded point cloud: points=2 order=1 side=2 capacity=8' && printf '%s' \"$out\" | grep -Fq 'First point: -0.500000 -0.500000 -0.500000 rgb=0,0,0' && printf '%s' \"$out\" | grep -Fq 'Last point: -0.500000 -0.500000 0.500000 rgb=255,0,0'"
+)
+
+add_test(
+  NAME hv_cli_3d_reject_invalid_point_size
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --order 1 --point-size 0 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid point size '0'\""
 )
 
 add_test(

@@ -4,6 +4,7 @@
 #include "hilbert3d.h"
 #include "palette.h"
 
+#include <math.h>
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -71,6 +72,7 @@ static void hv_point_cloud3d_reset(HvPointCloud3D *cloud)
   cloud->order = 0u;
   cloud->side = 0u;
   cloud->capacity = 0u;
+  memset(&cloud->bounds, 0, sizeof(cloud->bounds));
 }
 
 void hv_free_point_cloud3d(HvPointCloud3D *cloud)
@@ -101,6 +103,13 @@ int hv_build_point_cloud3d(
   size_t point_count = 0u;
   size_t alloc_size = 0u;
   size_t total_written = 0u;
+  float min_x = 0.0f;
+  float min_y = 0.0f;
+  float min_z = 0.0f;
+  float max_x = 0.0f;
+  float max_y = 0.0f;
+  float max_z = 0.0f;
+  int have_bounds = 0;
 
   if ((input_path == 0) || (cloud_out == 0)) {
     hv_set_error(err, err_size, "invalid arguments for 3D point cloud build");
@@ -190,6 +199,32 @@ int hv_build_point_cloud3d(
       points[index].r = rgb[0];
       points[index].g = rgb[1];
       points[index].b = rgb[2];
+
+      if (!have_bounds) {
+        min_x = max_x = points[index].x;
+        min_y = max_y = points[index].y;
+        min_z = max_z = points[index].z;
+        have_bounds = 1;
+      } else {
+        if (points[index].x < min_x) {
+          min_x = points[index].x;
+        }
+        if (points[index].y < min_y) {
+          min_y = points[index].y;
+        }
+        if (points[index].z < min_z) {
+          min_z = points[index].z;
+        }
+        if (points[index].x > max_x) {
+          max_x = points[index].x;
+        }
+        if (points[index].y > max_y) {
+          max_y = points[index].y;
+        }
+        if (points[index].z > max_z) {
+          max_z = points[index].z;
+        }
+      }
     }
 
     total_written += chunk_size;
@@ -205,5 +240,21 @@ int hv_build_point_cloud3d(
   cloud_out->order = order;
   cloud_out->side = side;
   cloud_out->capacity = capacity;
+  if (have_bounds) {
+    float dx = max_x - min_x;
+    float dy = max_y - min_y;
+    float dz = max_z - min_z;
+
+    cloud_out->bounds.min_x = min_x;
+    cloud_out->bounds.min_y = min_y;
+    cloud_out->bounds.min_z = min_z;
+    cloud_out->bounds.max_x = max_x;
+    cloud_out->bounds.max_y = max_y;
+    cloud_out->bounds.max_z = max_z;
+    cloud_out->bounds.center_x = (min_x + max_x) * 0.5f;
+    cloud_out->bounds.center_y = (min_y + max_y) * 0.5f;
+    cloud_out->bounds.center_z = (min_z + max_z) * 0.5f;
+    cloud_out->bounds.radius = 0.5f * sqrtf((dx * dx) + (dy * dy) + (dz * dz));
+  }
   return 1;
 }

@@ -51,56 +51,6 @@ static PFNGLGENBUFFERSPROC hv_glGenBuffers_ptr = 0;
 static PFNGLBINDBUFFERPROC hv_glBindBuffer_ptr = 0;
 static PFNGLBUFFERDATAPROC hv_glBufferData_ptr = 0;
 static PFNGLDELETEBUFFERSPROC hv_glDeleteBuffers_ptr = 0;
-
-static int hv_3d_renderer_load_gl(char *err, size_t err_size)
-{
-  if ((hv_glGenBuffers_ptr != 0) && (hv_glBindBuffer_ptr != 0) && (hv_glBufferData_ptr != 0) && (hv_glDeleteBuffers_ptr != 0)) {
-    return 1;
-  }
-
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpedantic"
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-  hv_glGenBuffers_ptr = (PFNGLGENBUFFERSPROC)SDL_GL_GetProcAddress("glGenBuffers");
-  hv_glBindBuffer_ptr = (PFNGLBINDBUFFERPROC)SDL_GL_GetProcAddress("glBindBuffer");
-  hv_glBufferData_ptr = (PFNGLBUFFERDATAPROC)SDL_GL_GetProcAddress("glBufferData");
-  hv_glDeleteBuffers_ptr = (PFNGLDELETEBUFFERSPROC)SDL_GL_GetProcAddress("glDeleteBuffers");
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-
-  if ((hv_glGenBuffers_ptr == 0) || (hv_glBindBuffer_ptr == 0) || (hv_glBufferData_ptr == 0) || (hv_glDeleteBuffers_ptr == 0)) {
-    hv_set_error(err, err_size, "required OpenGL buffer functions are unavailable");
-    return 0;
-  }
-
-  return 1;
-}
-
-static void hv_3d_renderer_apply_projection(uint32_t viewport_width, uint32_t viewport_height)
-{
-  double aspect = 1.0;
-  double near_plane = 1.0;
-  double far_plane = 10.0;
-  double top = 0.75 * near_plane;
-  double right = top;
-
-  if (viewport_height == 0u) {
-    viewport_height = 1u;
-  }
-  aspect = (double)viewport_width / (double)viewport_height;
-  right = top * aspect;
-
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  glFrustum(-right, right, -top, top, near_plane, far_plane);
-}
 #endif
 
 int hv_3d_renderer_init(
@@ -121,8 +71,37 @@ int hv_3d_renderer_init(
   renderer->vertex_buffer = 0u;
   renderer->vertex_count = cloud->count;
 
-  if (!hv_3d_renderer_load_gl(err, err_size)) {
-    return 0;
+  if (
+    (hv_glGenBuffers_ptr == 0) ||
+    (hv_glBindBuffer_ptr == 0) ||
+    (hv_glBufferData_ptr == 0) ||
+    (hv_glDeleteBuffers_ptr == 0)
+  ) {
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpedantic"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+    hv_glGenBuffers_ptr = (PFNGLGENBUFFERSPROC)SDL_GL_GetProcAddress("glGenBuffers");
+    hv_glBindBuffer_ptr = (PFNGLBINDBUFFERPROC)SDL_GL_GetProcAddress("glBindBuffer");
+    hv_glBufferData_ptr = (PFNGLBUFFERDATAPROC)SDL_GL_GetProcAddress("glBufferData");
+    hv_glDeleteBuffers_ptr = (PFNGLDELETEBUFFERSPROC)SDL_GL_GetProcAddress("glDeleteBuffers");
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+    if (
+      (hv_glGenBuffers_ptr == 0) ||
+      (hv_glBindBuffer_ptr == 0) ||
+      (hv_glBufferData_ptr == 0) ||
+      (hv_glDeleteBuffers_ptr == 0)
+    ) {
+      hv_set_error(err, err_size, "required OpenGL buffer functions are unavailable");
+      return 0;
+    }
   }
 
   if (cloud->count == 0u) {
@@ -156,6 +135,23 @@ int hv_3d_renderer_init(
 #endif
 }
 
+int hv_3d_renderer_validate_point_size(float point_size, char *err, size_t err_size)
+{
+  if ((point_size < HV_3D_POINT_SIZE_MIN) || (point_size > HV_3D_POINT_SIZE_MAX)) {
+    hv_set_error(
+      err,
+      err_size,
+      "invalid 3D point size %.3f (supported range: %.1f..%.1f)",
+      (double)point_size,
+      (double)HV_3D_POINT_SIZE_MIN,
+      (double)HV_3D_POINT_SIZE_MAX
+    );
+    return 0;
+  }
+
+  return 1;
+}
+
 void hv_3d_renderer_shutdown(Hv3DRenderer *renderer)
 {
 #if defined(HV_3D_VIEWER_AVAILABLE)
@@ -177,13 +173,23 @@ int hv_3d_renderer_draw(
   const Hv3DCamera *camera,
   uint32_t viewport_width,
   uint32_t viewport_height,
+  float point_size,
   char *err,
   size_t err_size
 )
 {
 #if defined(HV_3D_VIEWER_AVAILABLE)
+  double aspect = 1.0;
+  double near_plane = 1.0;
+  double far_plane = 10.0;
+  double top = 0.75 * near_plane;
+  double right = top;
+
   if ((renderer == 0) || (camera == 0)) {
     hv_set_error(err, err_size, "invalid arguments for 3D renderer draw");
+    return 0;
+  }
+  if (!hv_3d_renderer_validate_point_size(point_size, err, err_size)) {
     return 0;
   }
 
@@ -191,15 +197,24 @@ int hv_3d_renderer_draw(
   glClearColor(0.03f, 0.04f, 0.07f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glEnable(GL_DEPTH_TEST);
-  glPointSize(2.0f);
+  glPointSize(point_size);
 
-  hv_3d_renderer_apply_projection(viewport_width, viewport_height);
+  if (viewport_height == 0u) {
+    viewport_height = 1u;
+  }
+  aspect = (double)viewport_width / (double)viewport_height;
+  right = top * aspect;
+
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  glFrustum(-right, right, -top, top, near_plane, far_plane);
 
   glMatrixMode(GL_MODELVIEW);
   glLoadIdentity();
   glTranslatef(0.0f, 0.0f, -camera->distance);
   glRotatef(camera->pitch_degrees, 1.0f, 0.0f, 0.0f);
   glRotatef(camera->yaw_degrees, 0.0f, 1.0f, 0.0f);
+  glTranslatef(-camera->target_x, -camera->target_y, -camera->target_z);
 
   if ((renderer->vertex_count > 0u) && (renderer->vertex_buffer != 0u)) {
     glEnableClientState(GL_VERTEX_ARRAY);
@@ -217,6 +232,9 @@ int hv_3d_renderer_draw(
 #else
   (void)viewport_width;
   (void)viewport_height;
+  if (!hv_3d_renderer_validate_point_size(point_size, err, err_size)) {
+    return 0;
+  }
   if ((renderer == 0) || (camera == 0)) {
     hv_set_error(err, err_size, "invalid arguments for 3D renderer draw");
     return 0;
