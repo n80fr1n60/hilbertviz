@@ -1,5 +1,6 @@
 #include "file_io.h"
 #include "hilbert.h"
+#include "hilbert3d.h"
 #include "image.h"
 #include "palette.h"
 #include "png_writer.h"
@@ -230,6 +231,112 @@ static void test_gilbert_depth_limit_and_skinny_extremes(void)
   TEST_CHECK(hv_gilbert_d2xy_with_limit(1u, tall_height, last_index, 0u, &x, &y));
   TEST_CHECK(x == 0u);
   TEST_CHECK(y == tall_height - 1u);
+}
+
+static void test_hilbert3d_order_helpers(void)
+{
+  uint32_t side = 0u;
+  uint64_t capacity = 0u;
+
+  TEST_CHECK(!hv_hilbert3d_side_for_order(0u, &side));
+  TEST_CHECK(!hv_hilbert3d_side_for_order(8u, &side));
+  TEST_CHECK(!hv_hilbert3d_side_for_order(1u, 0));
+  TEST_CHECK(hv_hilbert3d_side_for_order(1u, &side));
+  TEST_CHECK(side == 2u);
+  TEST_CHECK(hv_hilbert3d_side_for_order(7u, &side));
+  TEST_CHECK(side == 128u);
+
+  TEST_CHECK(!hv_hilbert3d_capacity_for_order(0u, &capacity));
+  TEST_CHECK(!hv_hilbert3d_capacity_for_order(8u, &capacity));
+  TEST_CHECK(!hv_hilbert3d_capacity_for_order(1u, 0));
+  TEST_CHECK(hv_hilbert3d_capacity_for_order(1u, &capacity));
+  TEST_CHECK(capacity == 8u);
+  TEST_CHECK(hv_hilbert3d_capacity_for_order(7u, &capacity));
+  TEST_CHECK(capacity == 2097152u);
+}
+
+static void test_hilbert3d_d2xyz_order1(void)
+{
+  static const uint32_t expected[8][3] = {
+    {0u, 0u, 0u},
+    {0u, 0u, 1u},
+    {0u, 1u, 1u},
+    {0u, 1u, 0u},
+    {1u, 1u, 0u},
+    {1u, 1u, 1u},
+    {1u, 0u, 1u},
+    {1u, 0u, 0u}
+  };
+  uint64_t d = 0u;
+
+  for (d = 0u; d < 8u; ++d) {
+    uint32_t x = 0u;
+    uint32_t y = 0u;
+    uint32_t z = 0u;
+
+    TEST_CHECK(hv_hilbert3d_d2xyz(1u, d, &x, &y, &z));
+    TEST_CHECK(x == expected[d][0]);
+    TEST_CHECK(y == expected[d][1]);
+    TEST_CHECK(z == expected[d][2]);
+  }
+}
+
+static void test_hilbert3d_bijection_and_adjacency(void)
+{
+  const uint32_t order = 2u;
+  uint32_t side = 0u;
+  uint64_t capacity = 0u;
+  uint8_t *visited = 0;
+  uint64_t d = 0u;
+  uint32_t prev_x = 0u;
+  uint32_t prev_y = 0u;
+  uint32_t prev_z = 0u;
+
+  TEST_CHECK(hv_hilbert3d_side_for_order(order, &side));
+  TEST_CHECK(hv_hilbert3d_capacity_for_order(order, &capacity));
+
+  visited = (uint8_t *)calloc((size_t)capacity, 1u);
+  TEST_CHECK(visited != 0);
+
+  for (d = 0u; d < capacity; ++d) {
+    uint32_t x = 0u;
+    uint32_t y = 0u;
+    uint32_t z = 0u;
+    uint64_t idx = 0u;
+
+    TEST_CHECK(hv_hilbert3d_d2xyz(order, d, &x, &y, &z));
+    TEST_CHECK(x < side);
+    TEST_CHECK(y < side);
+    TEST_CHECK(z < side);
+
+    idx = (((uint64_t)z * (uint64_t)side) + (uint64_t)y) * (uint64_t)side + (uint64_t)x;
+    TEST_CHECK(idx < capacity);
+    TEST_CHECK(visited[(size_t)idx] == 0u);
+    visited[(size_t)idx] = 1u;
+
+    if (d != 0u) {
+      uint32_t dx = (x > prev_x) ? (x - prev_x) : (prev_x - x);
+      uint32_t dy = (y > prev_y) ? (y - prev_y) : (prev_y - y);
+      uint32_t dz = (z > prev_z) ? (z - prev_z) : (prev_z - z);
+
+      TEST_CHECK((dx + dy + dz) == 1u);
+    }
+
+    prev_x = x;
+    prev_y = y;
+    prev_z = z;
+  }
+
+  for (d = 0u; d < capacity; ++d) {
+    TEST_CHECK(visited[(size_t)d] == 1u);
+  }
+
+  TEST_CHECK(!hv_hilbert3d_d2xyz(order, capacity, &prev_x, &prev_y, &prev_z));
+  TEST_CHECK(!hv_hilbert3d_d2xyz(0u, 0u, &prev_x, &prev_y, &prev_z));
+  TEST_CHECK(!hv_hilbert3d_d2xyz(8u, 0u, &prev_x, &prev_y, &prev_z));
+  TEST_CHECK(!hv_hilbert3d_d2xyz(order, 0u, 0, &prev_y, &prev_z));
+
+  free(visited);
 }
 
 static void test_palette_edges(void)
@@ -2601,6 +2708,9 @@ int main(void)
   test_hilbert_bijection();
   test_gilbert_rect_bijection();
   test_gilbert_depth_limit_and_skinny_extremes();
+  test_hilbert3d_order_helpers();
+  test_hilbert3d_d2xyz_order1();
+  test_hilbert3d_bijection_and_adjacency();
   test_palette_edges();
   test_image_api_dispatch_and_errors();
   test_ppm_writer_wrapper_and_error_paths();

@@ -1,6 +1,7 @@
 add_library(hvcore STATIC
   file_io.c
   hilbert.c
+  hilbert3d.c
   image.c
   palette.c
   png_writer.c
@@ -18,3 +19,6 @@ endif()
 
 add_executable(hilbertviz main.c)
 target_link_libraries(hilbertviz PRIVATE hvcore)
+
+add_executable(hilbertviz3d main_3d.c)
+target_link_libraries(hilbertviz3d PRIVATE hvcore)

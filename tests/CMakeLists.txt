@@ -8,6 +8,15 @@ endif()
 add_test(NAME hv_unit COMMAND test_hv)
 
 add_test(
+  NAME hv_cli_3d_help
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> --help 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Supported order range: 1..7'"
+)
+
+add_test(
   NAME hv_cli_reject_negative_offset
   COMMAND $<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o ${CMAKE_BINARY_DIR}/cli_neg_offset.ppm --offset -1
 )
