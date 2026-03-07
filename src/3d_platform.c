@@ -44,6 +44,36 @@ static void HV_PRINTF_LIKE(3, 4) hv_set_error(char *err, size_t err_size, const 
   va_end(args);
 }
 
+int hv_3d_platform_viewer_requested(void)
+{
+#if defined(HV_3D_VIEWER_REQUESTED)
+  return 1;
+#else
+  return 0;
+#endif
+}
+
+int hv_3d_platform_viewer_available(void)
+{
+#if defined(HV_3D_VIEWER_AVAILABLE)
+  return 1;
+#else
+  return 0;
+#endif
+}
+
+const char *hv_3d_platform_viewer_support_text(void)
+{
+  if (hv_3d_platform_viewer_available()) {
+    return "available (SDL2/OpenGL detected; static render path enabled)";
+  }
+  if (hv_3d_platform_viewer_requested()) {
+    return "unavailable (SDL2/OpenGL development packages not found)";
+  }
+  return "disabled at build time";
+}
+
+#if defined(HV_3D_VIEWER_AVAILABLE)
 static int hv_parse_truthy_env(const char *name)
 {
   const char *value = getenv(name);
@@ -86,35 +116,7 @@ static int hv_parse_u32_env(const char *name, uint32_t *out, char *err, size_t e
   *out = (uint32_t)parsed;
   return 1;
 }
-
-int hv_3d_platform_viewer_requested(void)
-{
-#if defined(HV_3D_VIEWER_REQUESTED)
-  return 1;
-#else
-  return 0;
 #endif
-}
-
-int hv_3d_platform_viewer_available(void)
-{
-#if defined(HV_3D_VIEWER_AVAILABLE)
-  return 1;
-#else
-  return 0;
-#endif
-}
-
-const char *hv_3d_platform_viewer_support_text(void)
-{
-  if (hv_3d_platform_viewer_available()) {
-    return "available (SDL2/OpenGL detected; static render path enabled)";
-  }
-  if (hv_3d_platform_viewer_requested()) {
-    return "unavailable (SDL2/OpenGL development packages not found)";
-  }
-  return "disabled at build time";
-}
 
 int hv_3d_platform_render_static_cloud(
   const HvPointCloud3D *cloud,
@@ -124,6 +126,7 @@ int hv_3d_platform_render_static_cloud(
 )
 {
 #if defined(HV_3D_VIEWER_AVAILABLE)
+
   SDL_Window *window = 0;
   SDL_GLContext context = 0;
   Hv3DRenderer renderer;
@@ -268,8 +271,11 @@ int hv_3d_platform_render_static_cloud(
 
   return 1;
 #else
-  (void)cloud;
-  (void)camera;
+  if ((cloud == 0) || (camera == 0)) {
+    hv_set_error(err, err_size, "invalid arguments for 3D platform render");
+    return 0;
+  }
+
   hv_set_error(err, err_size, "3D viewer path is not available in this build");
   return 0;
 #endif

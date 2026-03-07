@@ -146,8 +146,11 @@ int hv_3d_renderer_init(
   hv_glBindBuffer_ptr(GL_ARRAY_BUFFER, 0u);
   return 1;
 #else
-  (void)renderer;
-  (void)cloud;
+  if ((renderer == 0) || (cloud == 0)) {
+    hv_set_error(err, err_size, "invalid arguments for 3D renderer initialization");
+    return 0;
+  }
+
   hv_set_error(err, err_size, "3D renderer is unavailable in this build");
   return 0;
 #endif
@@ -212,10 +215,13 @@ int hv_3d_renderer_draw(
 
   return 1;
 #else
-  (void)renderer;
-  (void)camera;
   (void)viewport_width;
   (void)viewport_height;
+  if ((renderer == 0) || (camera == 0)) {
+    hv_set_error(err, err_size, "invalid arguments for 3D renderer draw");
+    return 0;
+  }
+
   hv_set_error(err, err_size, "3D renderer is unavailable in this build");
   return 0;
 #endif
