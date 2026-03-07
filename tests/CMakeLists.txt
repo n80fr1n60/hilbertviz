@@ -38,12 +38,84 @@ set_tests_properties(
 )
 
 add_test(
+  NAME hv_cli_reject_invalid_layout
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o ${CMAKE_BINARY_DIR}/cli_invalid_layout.ppm --layout spiral 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid layout 'spiral'\""
+)
+
+add_test(
+  NAME hv_cli_reject_invalid_dimensions
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o ${CMAKE_BINARY_DIR}/cli_invalid_dimensions.ppm --layout rect-hilbert --dimensions 3xx2 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid dimensions '3xx2'\""
+)
+
+add_test(
+  NAME hv_cli_reject_dimensions_without_rect_layout
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o ${CMAKE_BINARY_DIR}/cli_hilbert_with_dimensions.ppm --dimensions 3x2 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq -- '--dimensions is only supported with --layout rect-hilbert'"
+)
+
+add_test(
+  NAME hv_cli_reject_strict_adjacency_without_rect_layout
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o ${CMAKE_BINARY_DIR}/cli_hilbert_with_strict.ppm --strict-adjacency 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq -- '--strict-adjacency is only supported with --layout rect-hilbert'"
+)
+
+add_test(
+  NAME hv_cli_reject_rect_strict_parity
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o ${CMAKE_BINARY_DIR}/cli_rect_strict_reject.ppm --layout rect-hilbert --dimensions 3x2 --strict-adjacency 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq 'Strict adjacency rejected 3x2'"
+)
+
+add_test(
+  NAME hv_cli_reject_missing_output
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq 'Missing required --output path'"
+)
+
+add_test(
   NAME hv_cli_rect_dry_run
   COMMAND
     ${CMAKE_COMMAND} -E env
       bash
       -lc
       "out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o ${CMAKE_BINARY_DIR}/cli_rect_dry_run.ppm --layout rect-hilbert --dimensions 5x4 --dry-run 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -q 'layout: rect-hilbert'"
+)
+
+add_test(
+  NAME hv_cli_rect_render_success
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_rect_render.bin'; out_path='${CMAKE_BINARY_DIR}/cli_rect_render.ppm'; rm -f \"$input\" \"$out_path\"; truncate -s 6 \"$input\"; out=\"$($<TARGET_FILE:hilbertviz> \"$input\" -o \"$out_path\" --layout rect-hilbert --dimensions 3x2 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\" \"$out_path\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'layout=rect-hilbert, dimensions=3x2'"
+)
+
+add_test(
+  NAME hv_cli_rect_paginate_success
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_rect_paginate.bin'; out_stem='${CMAKE_BINARY_DIR}/cli_rect_paginate'; out_base=\"${out_stem}.ppm\"; rm -f \"$input\" \"$out_base\" \"${out_stem}\"_page*.ppm; truncate -s 10 \"$input\"; out=\"$($<TARGET_FILE:hilbertviz> \"$input\" -o \"$out_base\" --layout rect-hilbert --dimensions 3x2 --paginate 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\" \"$out_base\" \"${out_stem}\"_page*.ppm; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Wrote 2 pages based on' && printf '%s' \"$out\" | grep -Fq 'layout=rect-hilbert, dimensions=3x2'"
 )
 
 add_test(
@@ -80,6 +152,15 @@ add_test(
       bash
       -lc
       "out=\"$($<TARGET_FILE:hilbertviz> ${PROJECT_SOURCE_DIR}/README.md -o ${CMAKE_BINARY_DIR}/cli_hilbert_dry_run_manual.ppm --order 3 --dry-run 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -q 'layout: hilbert' && printf '%s' \"$out\" | grep -q 'order: 3' && printf '%s' \"$out\" | grep -q 'dimensions: 8x8'"
+)
+
+add_test(
+  NAME hv_cli_hilbert_paginate_success
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_hilbert_paginate.bin'; out_stem='${CMAKE_BINARY_DIR}/cli_hilbert_paginate'; out_base=\"${out_stem}.ppm\"; rm -f \"$input\" \"$out_base\" \"${out_stem}\"_page*.ppm; truncate -s 5 \"$input\"; out=\"$($<TARGET_FILE:hilbertviz> \"$input\" -o \"$out_base\" --order 1 --paginate 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\" \"$out_base\" \"${out_stem}\"_page*.ppm; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Wrote 2 pages based on' && printf '%s' \"$out\" | grep -Fq 'order=1, side=2'"
 )
 
 add_test(

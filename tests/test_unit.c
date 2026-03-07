@@ -802,6 +802,850 @@ static void test_render_output_char_device_succeeds(void)
   TEST_CHECK(unlink(input_template) == 0);
 }
 
+static void test_render_missing_input_reports_open_error(void)
+{
+  char missing_template[] = "/tmp/hv_missing_render_input_XXXXXX";
+  char output_template[] = "/tmp/hv_missing_render_output_XXXXXX";
+  int missing_fd = -1;
+  int output_fd = -1;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  missing_fd = mkstemp(missing_template);
+  TEST_CHECK(missing_fd >= 0);
+  TEST_CHECK(close(missing_fd) == 0);
+  TEST_CHECK(unlink(missing_template) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = missing_template;
+  options.output_path = output_template;
+  options.auto_order = 1;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "failed to open input") != 0);
+
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_auto_paginate_small_uses_auto_order(void)
+{
+  char input_template[] = "/tmp/hv_auto_paginate_small_input_XXXXXX";
+  char output_template[] = "/tmp/hv_auto_paginate_small_output_XXXXXX";
+  uint8_t payload[] = {0x01u, 0x02u, 0x03u, 0x04u, 0x05u};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+  struct stat out_stat;
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.auto_order = 1;
+  options.paginate = 1;
+
+  TEST_CHECK(hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(result.order == 2u);
+  TEST_CHECK(result.side == 4u);
+  TEST_CHECK(result.capacity == 16u);
+  TEST_CHECK(result.input_bytes == (uint64_t)sizeof(payload));
+  TEST_CHECK(result.page_count == 1u);
+  TEST_CHECK(stat(output_template, &out_stat) == 0);
+  TEST_CHECK(out_stat.st_size > 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_auto_paginate_large_uses_default_page_order(void)
+{
+  char input_template[] = "/tmp/hv_auto_paginate_large_input_XXXXXX";
+  char output_seed[] = "/tmp/hv_auto_paginate_large_output_XXXXXX";
+  char output_path[192];
+  char page1_path[192];
+  char page2_path[192];
+  const off_t large_size = (off_t)((1u << 24u) + 1u);
+  const char *ext = ".ppm";
+  int input_fd = -1;
+  int output_fd = -1;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+  struct stat out_stat;
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+#ifdef HV_TEST_HAVE_PNG
+  ext = ".png";
+#endif
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  TEST_CHECK(ftruncate(input_fd, large_size) == 0);
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_seed);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+  TEST_CHECK(unlink(output_seed) == 0);
+
+  TEST_CHECK(snprintf(output_path, sizeof(output_path), "%s%s", output_seed, ext) > 0);
+  TEST_CHECK(snprintf(page1_path, sizeof(page1_path), "%s_page0001%s", output_seed, ext) > 0);
+  TEST_CHECK(snprintf(page2_path, sizeof(page2_path), "%s_page0002%s", output_seed, ext) > 0);
+
+  options.input_path = input_template;
+  options.output_path = output_path;
+  options.auto_order = 1;
+  options.paginate = 1;
+
+  TEST_CHECK(hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(result.order == 12u);
+  TEST_CHECK(result.side == 4096u);
+  TEST_CHECK(result.capacity == (uint64_t)(1u << 24u));
+  TEST_CHECK(result.input_bytes == (uint64_t)large_size);
+  TEST_CHECK(result.page_count == 2u);
+  TEST_CHECK(stat(page1_path, &out_stat) == 0);
+  TEST_CHECK(out_stat.st_size > 0);
+  TEST_CHECK(stat(page2_path, &out_stat) == 0);
+  TEST_CHECK(out_stat.st_size > 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(page1_path) == 0);
+  TEST_CHECK(unlink(page2_path) == 0);
+}
+
+static void test_render_empty_input_succeeds(void)
+{
+  char input_template[] = "/tmp/hv_empty_input_XXXXXX";
+  char output_template[] = "/tmp/hv_empty_output_XXXXXX";
+  int input_fd = -1;
+  int output_fd = -1;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+  struct stat out_stat;
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.auto_order = 1;
+
+  TEST_CHECK(hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(result.order == 1u);
+  TEST_CHECK(result.side == 2u);
+  TEST_CHECK(result.capacity == 4u);
+  TEST_CHECK(result.input_bytes == 0u);
+  TEST_CHECK(result.page_count == 1u);
+
+  TEST_CHECK(stat(output_template, &out_stat) == 0);
+  TEST_CHECK((uint64_t)out_stat.st_size == 23u);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_rect_hilbert_strict_rejects_flipped_parity(void)
+{
+  char input_template[] = "/tmp/hv_rect_strict_flip_input_XXXXXX";
+  char output_template[] = "/tmp/hv_rect_strict_flip_output_XXXXXX";
+  uint8_t payload[] = {0x14u, 0x15u, 0x16u, 0x17u};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.layout = HV_LAYOUT_RECT_HILBERT;
+  options.dimensions_set = 1;
+  options.width = 2u;  /* smaller even */
+  options.height = 3u; /* larger odd */
+  options.strict_adjacency = 1;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "strict adjacency rejects") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_rejects_invalid_arguments(void)
+{
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  options.input_path = "/tmp/hv_invalid_render_input";
+  options.output_path = "/tmp/hv_invalid_render_output";
+
+  TEST_CHECK(!hv_render_file(0, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for render") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_render_file(&options, 0, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for render") != 0);
+}
+
+static void test_render_rejects_unknown_layout(void)
+{
+  char input_template[] = "/tmp/hv_unknown_layout_input_XXXXXX";
+  char output_template[] = "/tmp/hv_unknown_layout_output_XXXXXX";
+  uint8_t payload[] = {0x00u, 0x01u, 0x02u, 0x03u};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.auto_order = 1;
+  options.layout = 99;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "unknown layout mode") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_rejects_rect_without_dimensions(void)
+{
+  char input_template[] = "/tmp/hv_rect_missing_dims_input_XXXXXX";
+  char output_template[] = "/tmp/hv_rect_missing_dims_output_XXXXXX";
+  uint8_t payload[] = {0x10u, 0x11u, 0x12u, 0x13u};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.layout = HV_LAYOUT_RECT_HILBERT;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "requires explicit dimensions") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_rejects_rect_zero_dimensions(void)
+{
+  char input_template[] = "/tmp/hv_rect_zero_dims_input_XXXXXX";
+  char output_template[] = "/tmp/hv_rect_zero_dims_output_XXXXXX";
+  uint8_t payload[] = {0x21u, 0x22u, 0x23u, 0x24u};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.layout = HV_LAYOUT_RECT_HILBERT;
+  options.dimensions_set = 1;
+  options.width = 0u;
+  options.height = 2u;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "dimensions must be positive") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_rejects_hilbert_dimensions(void)
+{
+  char input_template[] = "/tmp/hv_hilbert_dims_input_XXXXXX";
+  char output_template[] = "/tmp/hv_hilbert_dims_output_XXXXXX";
+  uint8_t payload[] = {0x31u, 0x32u, 0x33u, 0x34u};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.auto_order = 1;
+  options.layout = HV_LAYOUT_HILBERT;
+  options.dimensions_set = 1;
+  options.width = 2u;
+  options.height = 2u;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "dimensions are only supported") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_rejects_invalid_manual_order(void)
+{
+  char input_template[] = "/tmp/hv_bad_order_input_XXXXXX";
+  char output_template[] = "/tmp/hv_bad_order_output_XXXXXX";
+  uint8_t payload[] = {0x40u, 0x41u, 0x42u, 0x43u};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.auto_order = 0;
+  options.order = 0u;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid order 0") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_rejects_input_exceeds_capacity_without_paginate(void)
+{
+  char input_template[] = "/tmp/hv_no_paginate_input_XXXXXX";
+  char output_template[] = "/tmp/hv_no_paginate_output_XXXXXX";
+  uint8_t payload[] = {0x50u, 0x51u, 0x52u, 0x53u, 0x54u};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.auto_order = 0;
+  options.order = 1u;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "exceeds selected capacity") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_rejects_invalid_max_image_cap_env(void)
+{
+  char input_template[] = "/tmp/hv_bad_cap_input_XXXXXX";
+  char output_template[] = "/tmp/hv_bad_cap_output_XXXXXX";
+  uint8_t payload[] = {0x60u, 0x61u, 0x62u, 0x63u};
+  char *saved_cap = 0;
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+  saved_cap = test_save_env("HILBERTVIZ_MAX_IMAGE_BYTES");
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  TEST_CHECK(setenv("HILBERTVIZ_MAX_IMAGE_BYTES", "bogus", 1) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.auto_order = 1;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid HILBERTVIZ_MAX_IMAGE_BYTES='bogus'") != 0);
+
+  test_restore_env("HILBERTVIZ_MAX_IMAGE_BYTES", saved_cap);
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_rejects_legend_without_path(void)
+{
+  char input_template[] = "/tmp/hv_missing_legend_input_XXXXXX";
+  char output_template[] = "/tmp/hv_missing_legend_output_XXXXXX";
+  uint8_t payload[] = {0x70u, 0x71u, 0x72u, 0x73u};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.auto_order = 1;
+  options.legend_enabled = 1;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "legend was enabled but no legend path was provided") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+}
+
+static void test_render_rect_legend_with_explicit_length(void)
+{
+  char input_template[] = "/tmp/hv_rect_legend_input_XXXXXX";
+  char output_template[] = "/tmp/hv_rect_legend_output_XXXXXX";
+  char legend_path[160];
+  uint8_t payload[] = {0x00u, 0x11u, 0x22u, 0x7Fu, 0x80u, 0xFFu};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+  FILE *legend_fp = 0;
+  char legend_buf[1024];
+  size_t legend_n = 0u;
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  TEST_CHECK(snprintf(legend_path, sizeof(legend_path), "%s.legend.txt", output_template) > 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.legend_enabled = 1;
+  options.legend_path = legend_path;
+  options.layout = HV_LAYOUT_RECT_HILBERT;
+  options.dimensions_set = 1;
+  options.width = 3u;
+  options.height = 2u;
+  options.offset = 1u;
+  options.has_length = 1;
+  options.length = 4u;
+
+  TEST_CHECK(hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(result.page_count == 1u);
+  TEST_CHECK(result.capacity == 6u);
+  TEST_CHECK(result.input_bytes == 4u);
+
+  legend_fp = fopen(legend_path, "rb");
+  TEST_CHECK(legend_fp != 0);
+  legend_n = fread(legend_buf, 1u, sizeof(legend_buf) - 1u, legend_fp);
+  TEST_CHECK(legend_n > 0u);
+  legend_buf[legend_n] = '\0';
+  TEST_CHECK(strstr(legend_buf, "layout=rect-hilbert") != 0);
+  TEST_CHECK(strstr(legend_buf, "length=explicit") != 0);
+  TEST_CHECK(strstr(legend_buf, "order=n/a") != 0);
+  TEST_CHECK(fclose(legend_fp) == 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+  TEST_CHECK(unlink(legend_path) == 0);
+}
+
+static void test_render_rejects_directory_output_target(void)
+{
+  char input_template[] = "/tmp/hv_output_dir_input_XXXXXX";
+  char output_dir_template[] = "/tmp/hv_output_dir_target_XXXXXX";
+  uint8_t payload[] = {0x80u, 0x81u, 0x82u, 0x83u};
+  char *output_dir = 0;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_dir = mkdtemp(output_dir_template);
+  TEST_CHECK(output_dir != 0);
+
+  options.input_path = input_template;
+  options.output_path = output_dir;
+  options.auto_order = 1;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "unsupported output page target type") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(rmdir(output_dir) == 0);
+}
+
+static void test_render_rejects_symlink_output_target(void)
+{
+  char input_template[] = "/tmp/hv_symlink_input_XXXXXX";
+  char target_template[] = "/tmp/hv_symlink_target_XXXXXX";
+  char link_template[] = "/tmp/hv_symlink_output_XXXXXX";
+  uint8_t payload[] = {0x90u, 0x91u, 0x92u, 0x93u};
+  int input_fd = -1;
+  int target_fd = -1;
+  int seed_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  target_fd = mkstemp(target_template);
+  TEST_CHECK(target_fd >= 0);
+  TEST_CHECK(close(target_fd) == 0);
+
+  seed_fd = mkstemp(link_template);
+  TEST_CHECK(seed_fd >= 0);
+  TEST_CHECK(close(seed_fd) == 0);
+  TEST_CHECK(unlink(link_template) == 0);
+  TEST_CHECK(symlink(target_template, link_template) == 0);
+
+  options.input_path = input_template;
+  options.output_path = link_template;
+  options.auto_order = 1;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "refusing symlink output page path") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(target_template) == 0);
+  TEST_CHECK(unlink(link_template) == 0);
+}
+
+static void test_render_rejects_legend_directory_target(void)
+{
+  char input_template[] = "/tmp/hv_legend_dir_input_XXXXXX";
+  char output_template[] = "/tmp/hv_legend_dir_output_XXXXXX";
+  char legend_dir_template[] = "/tmp/hv_legend_dir_target_XXXXXX";
+  uint8_t payload[] = {0x12u, 0x34u, 0x56u, 0x78u};
+  char *legend_dir = 0;
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_template);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+
+  legend_dir = mkdtemp(legend_dir_template);
+  TEST_CHECK(legend_dir != 0);
+
+  options.input_path = input_template;
+  options.output_path = output_template;
+  options.legend_enabled = 1;
+  options.legend_path = legend_dir;
+  options.auto_order = 1;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "unsupported legend target type") != 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_template) == 0);
+  TEST_CHECK(rmdir(legend_dir) == 0);
+}
+
+static void test_render_page_write_failure_closes_legend(void)
+{
+  char input_template[] = "/tmp/hv_bad_ext_input_XXXXXX";
+  char output_seed[] = "/tmp/hv_bad_ext_output_XXXXXX";
+  char output_path[160];
+  char legend_path[160];
+  uint8_t payload[] = {0x01u, 0x23u, 0x45u, 0x67u};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+  FILE *legend_fp = 0;
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_seed);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+  TEST_CHECK(unlink(output_seed) == 0);
+
+  TEST_CHECK(snprintf(output_path, sizeof(output_path), "%s.bad", output_seed) > 0);
+  TEST_CHECK(snprintf(legend_path, sizeof(legend_path), "%s.legend.txt", output_seed) > 0);
+
+  options.input_path = input_template;
+  options.output_path = output_path;
+  options.legend_enabled = 1;
+  options.legend_path = legend_path;
+  options.auto_order = 1;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "unsupported output extension") != 0);
+
+  legend_fp = fopen(legend_path, "rb");
+  TEST_CHECK(legend_fp != 0);
+  TEST_CHECK(fclose(legend_fp) == 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(output_path) == 0);
+  TEST_CHECK(unlink(legend_path) == 0);
+}
+
+static void test_render_page_open_failure_closes_legend(void)
+{
+  char input_template[] = "/tmp/hv_missing_dir_input_XXXXXX";
+  char output_seed[] = "/tmp/hv_missing_dir_seed_XXXXXX";
+  char output_path[224];
+  char legend_path[160];
+  uint8_t payload[] = {0x09u, 0x08u, 0x07u, 0x06u};
+  int input_fd = -1;
+  int output_fd = -1;
+  ssize_t wrote = 0;
+  HvRenderOptions options;
+  HvRenderResult result;
+  char err[256];
+  FILE *legend_fp = 0;
+
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  output_fd = mkstemp(output_seed);
+  TEST_CHECK(output_fd >= 0);
+  TEST_CHECK(close(output_fd) == 0);
+  TEST_CHECK(unlink(output_seed) == 0);
+
+  TEST_CHECK(snprintf(output_path, sizeof(output_path), "%s/missing/out.ppm", output_seed) > 0);
+  TEST_CHECK(snprintf(legend_path, sizeof(legend_path), "%s.legend.txt", output_seed) > 0);
+
+  options.input_path = input_template;
+  options.output_path = output_path;
+  options.legend_enabled = 1;
+  options.legend_path = legend_path;
+  options.auto_order = 1;
+
+  TEST_CHECK(!hv_render_file(&options, &result, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "failed to open output page") != 0);
+
+  legend_fp = fopen(legend_path, "rb");
+  TEST_CHECK(legend_fp != 0);
+  TEST_CHECK(fclose(legend_fp) == 0);
+
+  TEST_CHECK(unlink(input_template) == 0);
+  TEST_CHECK(unlink(legend_path) == 0);
+}
+
 static void test_ppm_stream_rejects_size_overflow(void)
 {
   FILE *fp = 0;
@@ -1008,6 +1852,62 @@ static void test_file_io_respects_max_slice_cap(void)
 
   hv_free_buffer(&slice);
   test_restore_env("HILBERTVIZ_MAX_SLICE_BYTES", saved_cap);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_file_io_rejects_invalid_max_slice_cap_env(void)
+{
+  char input_template[] = "/tmp/hv_bad_slice_env_input_XXXXXX";
+  char *saved_cap = 0;
+  uint8_t payload[] = {0xA1u, 0xA2u, 0xA3u, 0xA4u};
+  HvBuffer slice;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+
+  memset(&slice, 0, sizeof(slice));
+  memset(err, 0, sizeof(err));
+  saved_cap = test_save_env("HILBERTVIZ_MAX_SLICE_BYTES");
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(setenv("HILBERTVIZ_MAX_SLICE_BYTES", "oops", 1) == 0);
+  TEST_CHECK(!hv_read_file_slice(input_template, 0u, 0, 0u, &slice, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid HILBERTVIZ_MAX_SLICE_BYTES='oops'") != 0);
+  TEST_CHECK(slice.data == 0);
+  TEST_CHECK(slice.size == 0u);
+
+  test_restore_env("HILBERTVIZ_MAX_SLICE_BYTES", saved_cap);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_file_io_zero_length_slice_succeeds(void)
+{
+  char input_template[] = "/tmp/hv_zero_slice_input_XXXXXX";
+  uint8_t payload[] = {0xB1u, 0xB2u, 0xB3u, 0xB4u};
+  HvBuffer slice;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+
+  memset(&slice, 0, sizeof(slice));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_read_file_slice(input_template, 2u, 1, 0u, &slice, err, sizeof(err)));
+  TEST_CHECK(slice.data == 0);
+  TEST_CHECK(slice.size == 0u);
+
+  hv_free_buffer(&slice);
   TEST_CHECK(unlink(input_template) == 0);
 }
 
@@ -1605,13 +2505,35 @@ int main(void)
   test_render_paginate_and_legend();
   test_render_rect_hilbert_integration();
   test_render_rect_hilbert_strict_rejects_parity();
+  test_render_rect_hilbert_strict_rejects_flipped_parity();
   test_render_respects_max_image_cap();
   test_render_output_char_device_succeeds();
+  test_render_missing_input_reports_open_error();
+  test_render_auto_paginate_small_uses_auto_order();
+  test_render_auto_paginate_large_uses_default_page_order();
+  test_render_empty_input_succeeds();
+  test_render_rejects_invalid_arguments();
+  test_render_rejects_unknown_layout();
+  test_render_rejects_rect_without_dimensions();
+  test_render_rejects_rect_zero_dimensions();
+  test_render_rejects_hilbert_dimensions();
+  test_render_rejects_invalid_manual_order();
+  test_render_rejects_input_exceeds_capacity_without_paginate();
+  test_render_rejects_invalid_max_image_cap_env();
+  test_render_rejects_legend_without_path();
+  test_render_rect_legend_with_explicit_length();
+  test_render_rejects_directory_output_target();
+  test_render_rejects_symlink_output_target();
+  test_render_rejects_legend_directory_target();
+  test_render_page_write_failure_closes_legend();
+  test_render_page_open_failure_closes_legend();
   test_ppm_stream_rejects_size_overflow();
   test_file_io_slice_and_stream_semantics();
   test_file_io_stream_detects_truncate_race();
   test_file_io_additional_error_paths();
   test_file_io_respects_max_slice_cap();
+  test_file_io_rejects_invalid_max_slice_cap_env();
+  test_file_io_zero_length_slice_succeeds();
   test_alias_legend_equals_input_rejected();
   test_alias_output_equals_input_rejected();
   test_alias_legend_equals_output_rejected();
