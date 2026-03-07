@@ -149,7 +149,8 @@ Experimental 3D scaffold:
 
 Notes:
 
-- `hilbertviz3d` keeps a non-interactive fallback path even when SDL2/OpenGL viewer dependencies are unavailable or disabled.
+- `hilbertviz3d` opens a static 3D point viewer when SDL2/OpenGL support is available.
+- `hilbertviz3d` keeps a non-interactive fallback path when SDL2/OpenGL viewer dependencies are unavailable or disabled.
 - `HILBERTVIZ_WITH_3D_VIEWER=ON` (default) enables SDL2/OpenGL dependency discovery for the upcoming interactive viewer work.
 
 Help:
@@ -181,7 +182,7 @@ Help:
 - For multi-page output, files are named with `_pageNNNN` suffixes.
 - `--layout hilbert` is canonical square Hilbert (`2^n x 2^n`).
 - `--layout rect-hilbert` is a generalized rectangular Hilbert-like traversal.
-- `hilbertviz3d` currently builds a normalized colored 3D point cloud and prints a summary; interactive rendering is deferred.
+- `hilbertviz3d` currently opens a static SDL/OpenGL point viewer after building the normalized colored 3D point cloud and printing a summary; interactive controls are deferred.
 - SDL2/OpenGL viewer dependency detection is optional and controlled by `HILBERTVIZ_WITH_3D_VIEWER`.
 - `--entropy` prints Shannon entropy for the exact rendered slice in bits/byte.
 - Legend output appends `entropy_bits_per_byte=<value>` for the rendered slice.

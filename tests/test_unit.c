@@ -1,4 +1,5 @@
 #include "3d_camera.h"
+#include "3d_platform.h"
 #include "3d_renderer.h"
 #include "file_io.h"
 #include "hilbert.h"
@@ -164,6 +165,33 @@ static void test_3d_renderer_summary_output(void)
   TEST_CHECK(strstr(buf, "First point: -0.500000 -0.500000 -0.500000 rgb=0,0,0") != 0);
   TEST_CHECK(strstr(buf, "Last point: -0.500000 -0.500000 0.500000 rgb=255,0,0") != 0);
   TEST_CHECK(fclose(fp) == 0);
+}
+
+static void test_3d_renderer_invalid_arguments(void)
+{
+  Hv3DRenderer renderer;
+  Hv3DCamera camera;
+  char err[256];
+
+  memset(&renderer, 0, sizeof(renderer));
+  memset(&camera, 0, sizeof(camera));
+  memset(err, 0, sizeof(err));
+
+  TEST_CHECK(!hv_3d_renderer_init(0, 0, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_3d_renderer_draw(0, &camera, 640u, 480u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments") != 0);
+}
+
+static void test_3d_platform_invalid_arguments(void)
+{
+  char err[256];
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_3d_platform_render_static_cloud(0, 0, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments") != 0);
 }
 
 static void test_hilbert_order_helpers(void)
@@ -2953,6 +2981,8 @@ int main(void)
   test_hilbert3d_bijection_and_adjacency();
   test_3d_camera_defaults();
   test_3d_renderer_summary_output();
+  test_3d_renderer_invalid_arguments();
+  test_3d_platform_invalid_arguments();
   test_point_cloud3d_empty_slice();
   test_point_cloud3d_small_deterministic();
   test_point_cloud3d_near_capacity_slice();

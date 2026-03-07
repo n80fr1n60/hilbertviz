@@ -8,7 +8,7 @@ endif()
 add_test(NAME hv_unit COMMAND test_hv)
 
 if(HILBERTVIZ_3D_VIEWER_AVAILABLE)
-  set(HV_3D_VIEWER_HELP_EXPECTED "Interactive viewer support: available (SDL2/OpenGL detected; render loop not wired yet)")
+  set(HV_3D_VIEWER_HELP_EXPECTED "Interactive viewer support: available (SDL2/OpenGL detected; static render path enabled)")
 elseif(HILBERTVIZ_WITH_3D_VIEWER)
   set(HV_3D_VIEWER_HELP_EXPECTED "Interactive viewer support: unavailable (SDL2/OpenGL development packages not found)")
 else()
@@ -28,6 +28,7 @@ add_test(
   NAME hv_cli_3d_summary
   COMMAND
     ${CMAKE_COMMAND} -E env
+      HILBERTVIZ3D_SKIP_VIEWER=1
       bash
       -lc
       "input='${CMAKE_BINARY_DIR}/cli_3d_summary.bin'; rm -f \"$input\"; printf '\\000\\377' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --order 1 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Loaded point cloud: points=2 order=1 side=2 capacity=8' && printf '%s' \"$out\" | grep -Fq 'First point: -0.500000 -0.500000 -0.500000 rgb=0,0,0' && printf '%s' \"$out\" | grep -Fq 'Last point: -0.500000 -0.500000 0.500000 rgb=255,0,0'"

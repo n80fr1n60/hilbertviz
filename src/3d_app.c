@@ -85,6 +85,22 @@ static int hv3d_parse_order(const char *text, uint32_t *order_out)
   return 1;
 }
 
+static int hv3d_skip_viewer(void)
+{
+  const char *value = getenv("HILBERTVIZ3D_SKIP_VIEWER");
+
+  if (value == 0) {
+    return 0;
+  }
+
+  return
+    (strcmp(value, "1") == 0) ||
+    (strcmp(value, "true") == 0) ||
+    (strcmp(value, "TRUE") == 0) ||
+    (strcmp(value, "yes") == 0) ||
+    (strcmp(value, "YES") == 0);
+}
+
 int hv_3d_run_app(int argc, char **argv)
 {
   static const struct option long_options[] = {
@@ -164,6 +180,14 @@ int hv_3d_run_app(int argc, char **argv)
     hv_free_point_cloud3d(&cloud);
     (void)fprintf(stderr, "hilbertviz3d failed: %s\n", err);
     return 1;
+  }
+
+  if (hv_3d_platform_viewer_available() && !hv3d_skip_viewer()) {
+    if (!hv_3d_platform_render_static_cloud(&cloud, &camera, err, sizeof(err))) {
+      hv_free_point_cloud3d(&cloud);
+      (void)fprintf(stderr, "hilbertviz3d failed: %s\n", err);
+      return 1;
+    }
   }
 
   hv_free_point_cloud3d(&cloud);
