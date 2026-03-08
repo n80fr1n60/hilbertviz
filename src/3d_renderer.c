@@ -721,6 +721,7 @@ static void hv_3d_renderer_build_byte_cube_view_matrix(const Hv3DCamera *camera,
 }
 #endif
 
+#if defined(HV_3D_VIEWER_AVAILABLE)
 static void hv_3d_renderer_reset(Hv3DRenderer *renderer)
 {
   if (renderer == 0) {
@@ -767,6 +768,7 @@ static int hv_byte_cube_is_renderable(const HvByteCube3D *cube)
     (cube->total_voxels == HV_BYTE_CUBE_TOTAL_VOXELS)
   );
 }
+#endif
 
 float hv_3d_byte_cube_clamp_unit(float value);
 
@@ -1592,6 +1594,12 @@ int hv_3d_renderer_init_byte_cube(
     return 0;
   }
   if (!hv_3d_byte_cube_view_settings_validate(settings, err, err_size)) {
+    return 0;
+  }
+  if ((cube->voxels == 0) ||
+      (cube->side != HV_BYTE_CUBE_SIDE) ||
+      (cube->total_voxels != HV_BYTE_CUBE_TOTAL_VOXELS)) {
+    hv_set_error(err, err_size, "invalid byte-cube state for 3D renderer");
     return 0;
   }
 

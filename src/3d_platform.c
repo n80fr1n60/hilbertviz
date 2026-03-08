@@ -632,6 +632,125 @@ static int hv_3d_platform_render_scene(
 }
 #endif
 
+#if !defined(HV_3D_VIEWER_AVAILABLE)
+static void hv_3d_cycle_palette(Hv3DByteCubeViewSettings *settings)
+{
+  if (settings == 0) {
+    return;
+  }
+
+  switch (settings->palette) {
+    case HV_3D_BYTE_CUBE_PALETTE_RGB:
+      settings->palette = HV_3D_BYTE_CUBE_PALETTE_HEAT;
+      break;
+    case HV_3D_BYTE_CUBE_PALETTE_HEAT:
+      settings->palette = HV_3D_BYTE_CUBE_PALETTE_ASCII;
+      break;
+    case HV_3D_BYTE_CUBE_PALETTE_ASCII:
+      settings->palette = HV_3D_BYTE_CUBE_PALETTE_MONO;
+      break;
+    default:
+      settings->palette = HV_3D_BYTE_CUBE_PALETTE_RGB;
+      break;
+  }
+}
+
+static void hv_3d_adjust_byte_cube_keys(Hv3DByteCubeViewSettings *settings, float brightness_delta, float contrast_delta)
+{
+  if (settings == 0) {
+    return;
+  }
+
+  settings->brightness += brightness_delta;
+  settings->contrast += contrast_delta;
+  if (settings->brightness < -0.95f) {
+    settings->brightness = -0.95f;
+  } else if (settings->brightness > 0.95f) {
+    settings->brightness = 0.95f;
+  }
+  if (settings->contrast < 0.10f) {
+    settings->contrast = 0.10f;
+  } else if (settings->contrast > 4.00f) {
+    settings->contrast = 4.00f;
+  }
+}
+
+int hv_3d_platform_apply_byte_cube_control(Hv3DByteCubeViewSettings *settings, Hv3DByteCubeControl control)
+{
+  if (settings == 0) {
+    return 0;
+  }
+
+  switch (control) {
+    case HV_3D_BYTE_CUBE_CONTROL_BLEND_ACCUMULATE:
+      settings->blend_mode = HV_3D_BYTE_CUBE_BLEND_ACCUMULATE;
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_BLEND_ALPHA:
+      settings->blend_mode = HV_3D_BYTE_CUBE_BLEND_ALPHA;
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_CYCLE_PALETTE:
+      hv_3d_cycle_palette(settings);
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_BRIGHTNESS_STANDARD:
+      settings->brightness = 0.0f;
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_BRIGHTNESS_LOW:
+      settings->brightness = -0.08f;
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_BRIGHTNESS_INCREASE:
+      hv_3d_adjust_byte_cube_keys(settings, 0.02f, 0.0f);
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_BRIGHTNESS_DECREASE:
+      hv_3d_adjust_byte_cube_keys(settings, -0.02f, 0.0f);
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_CONTRAST_INCREASE:
+      hv_3d_adjust_byte_cube_keys(settings, 0.0f, 0.08f);
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_CONTRAST_DECREASE:
+      hv_3d_adjust_byte_cube_keys(settings, 0.0f, -0.08f);
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_INTENSITY_NEAREST:
+      settings->interpolation = HV_3D_BYTE_CUBE_INTERPOLATION_NEAREST;
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_INTENSITY_LINEAR:
+      settings->interpolation = HV_3D_BYTE_CUBE_INTERPOLATION_LINEAR;
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_POSITION_NEAREST:
+      settings->position_interpolation = HV_3D_BYTE_CUBE_INTERPOLATION_NEAREST;
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_POSITION_LINEAR:
+      settings->position_interpolation = HV_3D_BYTE_CUBE_INTERPOLATION_LINEAR;
+      return 1;
+    case HV_3D_BYTE_CUBE_CONTROL_RESET:
+      hv_3d_byte_cube_view_settings_init_defaults(settings);
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+int hv_3d_platform_reset_byte_cube_view(
+  Hv3DByteCubeViewSettings *settings,
+  Hv3DCamera *camera,
+  const HvByteCube3D *cube
+)
+{
+  uint32_t viewport_width = 0u;
+  uint32_t viewport_height = 0u;
+
+  if ((settings == 0) || (camera == 0) || (cube == 0)) {
+    return 0;
+  }
+
+  viewport_width = camera->viewport_width;
+  viewport_height = camera->viewport_height;
+  hv_3d_byte_cube_view_settings_init_defaults(settings);
+  hv_3d_camera_init_defaults(camera);
+  (void)hv_3d_camera_set_viewport(camera, viewport_width, viewport_height);
+  return hv_3d_camera_fit_byte_cube_overview(camera, cube);
+}
+#endif
+
 int hv_3d_platform_render_static_cloud(
   const HvPointCloud3D *cloud,
   const Hv3DCamera *camera,
