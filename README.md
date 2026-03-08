@@ -172,6 +172,33 @@ Experimental 3D scaffold:
 ./build/src/hilbertviz3d --help
 ```
 
+Flag summary:
+
+- `hilbertviz`
+  - `-o`, `--output <path>`: required output image path; extension selects `.ppm` or `.png`.
+  - `-n`, `--order <N>`: fixed square Hilbert order.
+  - `-a`, `--auto-order`: choose the smallest square Hilbert order that fits the selected slice; this is the default when `--order` is not given.
+  - `-f`, `--offset <bytes>` and `-l`, `--length <bytes>`: restrict rendering to a selected input slice.
+  - `-p`, `--paginate`: emit multiple output pages when one image cannot hold the selected slice.
+  - `-g`, `--legend` and `-G`, `--legend-path <path>`: write slice/page statistics to a sidecar legend file.
+  - `--entropy`: print Shannon entropy for the exact selected slice in bits per byte.
+  - `--layout <hilbert|rect-hilbert>`: choose the classic square Hilbert layout or the generalized rectangular traversal.
+  - `--dimensions <WxH>`: required with `--layout rect-hilbert`; selects the rectangular traversal dimensions.
+  - `--strict-adjacency`: reject rectangular dimensions that would force a diagonal step.
+  - `--dry-run`: print fit/planning details without writing output files.
+  - `-h`, `--help`: print help.
+- `hilbertviz3d`
+  - `--mode <hilbert|byte-cube>`: choose between the Hilbert point-cloud view and the trigram density-volume view.
+  - `--order <n>`: required only with `--mode hilbert`; selects the 3D Hilbert order.
+  - `--offset <bytes>` and `--length <bytes>`: restrict the 3D build to a selected input slice.
+  - `--point-size <pixels>`: point size for `--mode hilbert` point-cloud rendering.
+  - `--brightness <value>` and `--contrast <value>`: byte-cube density transfer controls; only valid with `--mode byte-cube`.
+  - `--palette <rgb|heat|ascii|mono>`: byte-cube coloring mode; only valid with `--mode byte-cube`.
+  - `--blend-mode <accumulate|alpha>`: byte-cube compositing mode; only valid with `--mode byte-cube`.
+  - `--projection <free-3d|xy|xz|yz>`: byte-cube free camera or fixed projection mode; only valid with `--mode byte-cube`.
+  - `--interpolation <linear|nearest>`: byte-cube texture filtering mode; only valid with `--mode byte-cube`.
+  - `-h`, `--help`: print help.
+
 Notes:
 
 - `hilbertviz3d` currently supports explicit modes:
