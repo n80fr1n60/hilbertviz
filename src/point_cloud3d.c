@@ -4,6 +4,7 @@
 #include "hilbert3d.h"
 #include "palette.h"
 
+#include <errno.h>
 #include <math.h>
 #include <inttypes.h>
 #include <stdarg.h>
@@ -13,6 +14,7 @@
 #include <string.h>
 
 #define HV_POINT_CLOUD3D_READ_CHUNK_BYTES 65536u
+#define HV_DEFAULT_MAX_POINT_CLOUD_BYTES (256ULL * 1024ULL * 1024ULL)
 
 #if defined(__GNUC__) || defined(__clang__)
 #define HV_PRINTF_LIKE(fmt_idx, first_arg_idx) __attribute__((format(printf, fmt_idx, first_arg_idx)))
@@ -54,6 +56,78 @@ static int hv_mul_size(size_t a, size_t b, size_t *out)
     return 0;
   }
   *out = a * b;
+  return 1;
+}
+
+static int hv_mul_u64(uint64_t a, uint64_t b, uint64_t *out)
+{
+  if (out == 0) {
+    return 0;
+  }
+  if ((a != 0u) && (b > (UINT64_MAX / a))) {
+    return 0;
+  }
+  *out = a * b;
+  return 1;
+}
+
+static int hv_parse_u64_decimal_strict(const char *text, uint64_t *out)
+{
+  const unsigned char *p = 0;
+  unsigned long long parsed = 0u;
+  char *end = 0;
+
+  if ((text == 0) || (out == 0) || (*text == '\0')) {
+    return 0;
+  }
+  if ((text[0] == '+') || (text[0] == '-')) {
+    return 0;
+  }
+
+  p = (const unsigned char *)text;
+  while (*p != '\0') {
+    if ((*p < (unsigned char)'0') || (*p > (unsigned char)'9')) {
+      return 0;
+    }
+    ++p;
+  }
+
+  errno = 0;
+  parsed = strtoull(text, &end, 10);
+  if ((errno != 0) || (end == text) || (*end != '\0')) {
+    return 0;
+  }
+
+  *out = (uint64_t)parsed;
+  return 1;
+}
+
+static int hv_resolve_max_point_cloud_bytes(uint64_t *out, char *err, size_t err_size)
+{
+  const char *env = getenv("HILBERTVIZ_MAX_POINT_CLOUD_BYTES");
+  uint64_t parsed = 0u;
+
+  if (out == 0) {
+    hv_set_error(err, err_size, "invalid point-cloud cap arguments");
+    return 0;
+  }
+
+  if ((env == 0) || (*env == '\0')) {
+    *out = HV_DEFAULT_MAX_POINT_CLOUD_BYTES;
+    return 1;
+  }
+
+  if (!hv_parse_u64_decimal_strict(env, &parsed)) {
+    hv_set_error(
+      err,
+      err_size,
+      "invalid HILBERTVIZ_MAX_POINT_CLOUD_BYTES='%s' (expected unsigned decimal bytes)",
+      env
+    );
+    return 0;
+  }
+
+  *out = parsed;
   return 1;
 }
 
@@ -103,6 +177,8 @@ int hv_build_point_cloud3d(
   size_t point_count = 0u;
   size_t alloc_size = 0u;
   size_t total_written = 0u;
+  uint64_t required_bytes = 0u;
+  uint64_t max_point_cloud_bytes = 0u;
   float min_x = 0.0f;
   float min_y = 0.0f;
   float min_z = 0.0f;
@@ -149,6 +225,26 @@ int hv_build_point_cloud3d(
   }
 
   point_count = (size_t)stream.total;
+  if (!hv_resolve_max_point_cloud_bytes(&max_point_cloud_bytes, err, err_size)) {
+    (void)hv_close_input_stream(&stream, 0, 0u);
+    return 0;
+  }
+  if ((stream.total > 0u) && !hv_mul_u64(stream.total, (uint64_t)sizeof(*points), &required_bytes)) {
+    hv_set_error(err, err_size, "3D point cloud allocation overflow");
+    (void)hv_close_input_stream(&stream, 0, 0u);
+    return 0;
+  }
+  if ((max_point_cloud_bytes != 0u) && (required_bytes > max_point_cloud_bytes)) {
+    hv_set_error(
+      err,
+      err_size,
+      "3D point cloud (%" PRIu64 " bytes) exceeds configured cap (%" PRIu64 " bytes); set HILBERTVIZ_MAX_POINT_CLOUD_BYTES to raise/disable (0) the cap",
+      required_bytes,
+      max_point_cloud_bytes
+    );
+    (void)hv_close_input_stream(&stream, 0, 0u);
+    return 0;
+  }
   if ((stream.total > 0u) && !hv_mul_size(point_count, sizeof(*points), &alloc_size)) {
     hv_set_error(err, err_size, "3D point cloud allocation overflow");
     (void)hv_close_input_stream(&stream, 0, 0u);

@@ -173,7 +173,12 @@ Experimental 3D scaffold:
 Notes:
 
 - `hilbertviz3d` opens a static 3D point viewer when SDL2/OpenGL support is available.
+- `hilbertviz3d` currently supports 3D orders `1..8`.
 - `hilbertviz3d` fits the initial view to the occupied point-cloud bounds.
+- Controls:
+  - left-drag: orbit
+  - mouse wheel: zoom
+  - `Esc`: close
 - `hilbertviz3d` keeps a non-interactive fallback path when SDL2/OpenGL viewer dependencies are unavailable or disabled.
 - `HILBERTVIZ_WITH_3D_VIEWER=ON` (default) enables SDL2/OpenGL dependency discovery for the upcoming interactive viewer work.
 
@@ -194,6 +199,8 @@ Help:
 - Override cap with `HILBERTVIZ_MAX_IMAGE_BYTES=<bytes>` (`0` disables cap).
 - Full-buffer slice reads are capped by default (`256 MiB`) and fail fast when exceeded.
 - Override full-buffer cap with `HILBERTVIZ_MAX_SLICE_BYTES=<bytes>` (`0` disables cap).
+- 3D point-cloud allocation is capped by default (`256 MiB`) and fails fast when exceeded.
+- Override 3D point-cloud cap with `HILBERTVIZ_MAX_POINT_CLOUD_BYTES=<bytes>` (`0` disables cap).
 - Numeric CLI values are strict unsigned decimal (`+`/`-` forms are rejected).
 - Slice validation uses `fstat` on the opened file descriptor to avoid path-race validation gaps.
 - Output targets must be regular files or character devices; symlinks/FIFOs/sockets are rejected.
@@ -206,7 +213,7 @@ Help:
 - For multi-page output, files are named with `_pageNNNN` suffixes.
 - `--layout hilbert` is canonical square Hilbert (`2^n x 2^n`).
 - `--layout rect-hilbert` is a generalized rectangular Hilbert-like traversal.
-- `hilbertviz3d` currently opens a static SDL/OpenGL point viewer after building the normalized colored 3D point cloud, fitting the initial camera to the occupied bounds, and printing a summary; interactive controls are deferred.
+- `hilbertviz3d` currently opens an SDL/OpenGL point viewer after building the normalized colored 3D point cloud, fitting the initial camera to the occupied bounds, and printing a summary.
 - `--point-size <pixels>` controls rendered point size for `hilbertviz3d`.
 - SDL2/OpenGL viewer dependency detection is optional and controlled by `HILBERTVIZ_WITH_3D_VIEWER`.
 - `--entropy` prints Shannon entropy for the exact rendered slice in bits/byte.

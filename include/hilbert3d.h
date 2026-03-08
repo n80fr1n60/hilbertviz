@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define HV_HILBERT3D_MIN_ORDER 1u
-#define HV_HILBERT3D_MAX_ORDER 7u
+#define HV_HILBERT3D_MAX_ORDER 8u
 
 int hv_hilbert3d_side_for_order(uint32_t order, uint32_t *side_out);
 int hv_hilbert3d_capacity_for_order(uint32_t order, uint64_t *capacity_out);

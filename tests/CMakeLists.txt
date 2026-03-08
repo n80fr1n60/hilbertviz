@@ -21,7 +21,7 @@ add_test(
     ${CMAKE_COMMAND} -E env
       bash
       -lc
-      "out=\"$($<TARGET_FILE:hilbertviz3d> --help 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Supported order range: 1..7' && printf '%s' \"$out\" | grep -Fq -- '--point-size <pixels>' && printf '%s' \"$out\" | grep -Fq '${HV_3D_VIEWER_HELP_EXPECTED}'"
+      "out=\"$($<TARGET_FILE:hilbertviz3d> --help 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Supported order range: 1..8' && printf '%s' \"$out\" | grep -Fq -- '--point-size <pixels>' && printf '%s' \"$out\" | grep -Fq '${HV_3D_VIEWER_HELP_EXPECTED}'"
 )
 
 add_test(
@@ -35,12 +35,87 @@ add_test(
 )
 
 add_test(
+  NAME hv_cli_3d_order8_summary
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      HILBERTVIZ3D_SKIP_VIEWER=1
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_3d_order8.bin'; rm -f \"$input\"; printf '\\000' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --order 8 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Loaded point cloud: points=1 order=8 side=256 capacity=16777216'"
+)
+
+add_test(
   NAME hv_cli_3d_reject_invalid_point_size
   COMMAND
     ${CMAKE_COMMAND} -E env
       bash
       -lc
       "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --order 1 --point-size 0 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid point size '0'\""
+)
+
+add_test(
+  NAME hv_cli_3d_reject_invalid_order
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --order 9 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid 3D order '9'\""
+)
+
+add_test(
+  NAME hv_cli_3d_reject_invalid_offset
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --order 1 --offset -1 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid offset '-1'\""
+)
+
+add_test(
+  NAME hv_cli_3d_reject_invalid_length
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --order 1 --length +1 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid length '+1'\""
+)
+
+add_test(
+  NAME hv_cli_3d_reject_missing_input
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> --order 1 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq 'hilbertviz3d: missing input path'"
+)
+
+add_test(
+  NAME hv_cli_3d_reject_missing_order
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq 'hilbertviz3d: missing required --order'"
+)
+
+add_test(
+  NAME hv_cli_3d_reject_extra_input
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md ${PROJECT_SOURCE_DIR}/README.md --order 1 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq 'hilbertviz3d: only one input path is supported'"
+)
+
+add_test(
+  NAME hv_cli_3d_reject_point_cloud_cap
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      HILBERTVIZ_MAX_POINT_CLOUD_BYTES=15
+      HILBERTVIZ3D_SKIP_VIEWER=1
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_3d_cap.bin'; rm -f \"$input\"; printf '\\000' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --order 8 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq 'exceeds configured cap' && printf '%s' \"$out\" | grep -Fq 'HILBERTVIZ_MAX_POINT_CLOUD_BYTES'"
 )
 
 add_test(

@@ -17,6 +17,11 @@ typedef struct Hv3DCamera {
 } Hv3DCamera;
 
 void hv_3d_camera_init_defaults(Hv3DCamera *camera);
+int hv_3d_camera_set_viewport(Hv3DCamera *camera, uint32_t width, uint32_t height);
+int hv_3d_camera_clamp_pitch(Hv3DCamera *camera);
+int hv_3d_camera_clamp_distance(Hv3DCamera *camera);
+int hv_3d_camera_orbit(Hv3DCamera *camera, float delta_x, float delta_y);
+int hv_3d_camera_zoom(Hv3DCamera *camera, float wheel_delta);
 int hv_3d_camera_fit_cloud(Hv3DCamera *camera, const HvPointCloud3D *cloud);
 
 #endif

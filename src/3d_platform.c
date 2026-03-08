@@ -74,6 +74,15 @@ const char *hv_3d_platform_viewer_support_text(void)
 }
 
 #if defined(HV_3D_VIEWER_AVAILABLE)
+typedef struct Hv3DViewerState {
+  int dragging;
+  int last_mouse_x;
+  int last_mouse_y;
+  uint32_t viewport_width;
+  uint32_t viewport_height;
+  int redraw_needed;
+} Hv3DViewerState;
+
 static int hv_parse_truthy_env(const char *name)
 {
   const char *value = getenv(name);
@@ -131,12 +140,10 @@ int hv_3d_platform_render_static_cloud(
   SDL_Window *window = 0;
   SDL_GLContext context = 0;
   Hv3DRenderer renderer;
+  Hv3DCamera camera_state;
+  Hv3DViewerState viewer_state;
   uint32_t render_frames = 0u;
   uint32_t frames_drawn = 0u;
-  int window_width_i = 0;
-  int window_height_i = 0;
-  uint32_t window_width = 0u;
-  uint32_t window_height = 0u;
   int hidden_window = 0;
   int running = 1;
   int need_video_quit = 0;
@@ -155,6 +162,12 @@ int hv_3d_platform_render_static_cloud(
   }
 
   memset(&renderer, 0, sizeof(renderer));
+  memset(&viewer_state, 0, sizeof(viewer_state));
+  camera_state = *camera;
+  (void)hv_3d_camera_set_viewport(&camera_state, camera->viewport_width, camera->viewport_height);
+  viewer_state.viewport_width = camera_state.viewport_width;
+  viewer_state.viewport_height = camera_state.viewport_height;
+  viewer_state.redraw_needed = 1;
   hidden_window = hv_parse_truthy_env("HILBERTVIZ3D_WINDOW_HIDDEN");
   if (!hv_parse_u32_env("HILBERTVIZ3D_RENDER_FRAMES", &render_frames, err, err_size)) {
     return 0;
@@ -226,43 +239,91 @@ int hv_3d_platform_render_static_cloud(
 
   while (running) {
     SDL_Event event;
+    int had_event = 0;
 
     while (SDL_PollEvent(&event) != 0) {
+      had_event = 1;
       if (event.type == SDL_QUIT) {
         running = 0;
       } else if ((event.type == SDL_KEYDOWN) && (event.key.keysym.sym == SDLK_ESCAPE)) {
         running = 0;
+      } else if ((event.type == SDL_MOUSEBUTTONDOWN) && (event.button.button == SDL_BUTTON_LEFT)) {
+        viewer_state.dragging = 1;
+        viewer_state.last_mouse_x = event.button.x;
+        viewer_state.last_mouse_y = event.button.y;
+      } else if ((event.type == SDL_MOUSEBUTTONUP) && (event.button.button == SDL_BUTTON_LEFT)) {
+        viewer_state.dragging = 0;
+      } else if ((event.type == SDL_MOUSEMOTION) && viewer_state.dragging) {
+        int dx = event.motion.x - viewer_state.last_mouse_x;
+        int dy = event.motion.y - viewer_state.last_mouse_y;
+
+        viewer_state.last_mouse_x = event.motion.x;
+        viewer_state.last_mouse_y = event.motion.y;
+        (void)hv_3d_camera_orbit(&camera_state, (float)dx, (float)dy);
+        viewer_state.redraw_needed = 1;
+      } else if (event.type == SDL_MOUSEWHEEL) {
+        float wheel_delta = (float)event.wheel.y;
+
+#if SDL_VERSION_ATLEAST(2, 0, 4)
+        if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
+          wheel_delta = -wheel_delta;
+        }
+#endif
+        if (wheel_delta != 0.0f) {
+          (void)hv_3d_camera_zoom(&camera_state, wheel_delta);
+          viewer_state.redraw_needed = 1;
+        }
+      } else if (event.type == SDL_WINDOWEVENT) {
+        if (
+          (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) ||
+          (event.window.event == SDL_WINDOWEVENT_RESIZED)
+        ) {
+          viewer_state.viewport_width = (event.window.data1 > 0) ? (uint32_t)event.window.data1 : 1u;
+          viewer_state.viewport_height = (event.window.data2 > 0) ? (uint32_t)event.window.data2 : 1u;
+          (void)hv_3d_camera_set_viewport(
+            &camera_state,
+            viewer_state.viewport_width,
+            viewer_state.viewport_height
+          );
+          viewer_state.redraw_needed = 1;
+        } else if (
+          (event.window.event == SDL_WINDOWEVENT_EXPOSED) ||
+          (event.window.event == SDL_WINDOWEVENT_SHOWN)
+        ) {
+          viewer_state.redraw_needed = 1;
+        }
       }
     }
 
-    SDL_GetWindowSize(window, &window_width_i, &window_height_i);
-    if (window_width_i > 0) {
-      window_width = (uint32_t)window_width_i;
-    }
-    if (window_height_i > 0) {
-      window_height = (uint32_t)window_height_i;
-    }
-    if (window_width == 0u) {
-      window_width = camera->viewport_width;
-    }
-    if (window_height == 0u) {
-      window_height = camera->viewport_height;
-    }
-
-    if (!hv_3d_renderer_draw(&renderer, camera, window_width, window_height, point_size, err, err_size)) {
-      hv_3d_renderer_shutdown(&renderer);
-      SDL_GL_DeleteContext(context);
-      SDL_DestroyWindow(window);
-      if (need_video_quit) {
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    if (viewer_state.redraw_needed || ((render_frames > 0u) && (frames_drawn < render_frames))) {
+      if (
+        !hv_3d_renderer_draw(
+          &renderer,
+          &camera_state,
+          viewer_state.viewport_width,
+          viewer_state.viewport_height,
+          point_size,
+          err,
+          err_size
+        )
+      ) {
+        hv_3d_renderer_shutdown(&renderer);
+        SDL_GL_DeleteContext(context);
+        SDL_DestroyWindow(window);
+        if (need_video_quit) {
+          SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        }
+        return 0;
       }
-      return 0;
-    }
 
-    SDL_GL_SwapWindow(window);
-    ++frames_drawn;
-    if ((render_frames > 0u) && (frames_drawn >= render_frames)) {
-      running = 0;
+      SDL_GL_SwapWindow(window);
+      viewer_state.redraw_needed = 0;
+      ++frames_drawn;
+      if ((render_frames > 0u) && (frames_drawn >= render_frames)) {
+        running = 0;
+      }
+    } else if (!had_event) {
+      SDL_Delay(16u);
     }
   }
 

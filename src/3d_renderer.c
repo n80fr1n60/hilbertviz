@@ -194,7 +194,7 @@ int hv_3d_renderer_draw(
   }
 
   glViewport(0, 0, (GLsizei)viewport_width, (GLsizei)viewport_height);
-  glClearColor(0.03f, 0.04f, 0.07f, 1.0f);
+  glClearColor(0.78f, 0.78f, 0.80f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glEnable(GL_DEPTH_TEST);
   glPointSize(point_size);
