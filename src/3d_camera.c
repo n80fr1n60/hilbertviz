@@ -4,22 +4,35 @@
 
 static const float HV_3D_CAMERA_PITCH_MIN_DEGREES = -85.0f;
 static const float HV_3D_CAMERA_PITCH_MAX_DEGREES = 85.0f;
-static const float HV_3D_CAMERA_DISTANCE_MIN = 0.75f;
+static const float HV_3D_CAMERA_DISTANCE_MIN = 0.20f;
 static const float HV_3D_CAMERA_DISTANCE_MAX = 24.0f;
 static const float HV_3D_CAMERA_ORBIT_DEGREES_PER_PIXEL = 0.30f;
 static const float HV_3D_CAMERA_ZOOM_FRACTION_PER_WHEEL = 0.12f;
-static const float HV_3D_CAMERA_ZOOM_MIN_STEP = 0.25f;
+static const float HV_3D_CAMERA_ZOOM_MIN_STEP = 0.05f;
+static const float HV_3D_CAMERA_BYTE_CUBE_OVERVIEW_PAD = 1.35f;
+static const float HV_3D_CAMERA_BYTE_CUBE_OVERVIEW_MIN_DISTANCE = 2.5f;
 
 static float hv_normalize_byte_cube_coord(uint8_t coord)
 {
   return ((((float)coord + 0.5f) / (float)HV_BYTE_CUBE_SIDE) * 2.0f) - 1.0f;
 }
 
+static uint32_t hv_3d_camera_shorter_side(uint32_t width, uint32_t height)
+{
+  if (width == 0u) {
+    width = 1u;
+  }
+  if (height == 0u) {
+    height = 1u;
+  }
+  return (width < height) ? width : height;
+}
+
 static int hv_3d_camera_fit_sphere(Hv3DCamera *camera, float center_x, float center_y, float center_z, float radius)
 {
   float aspect = 1.0f;
   float top = 0.75f;
-  float right = top;
+  float right = 0.0f;
   float min_half_extent = top;
   float fitted_distance = 0.0f;
 
@@ -198,4 +211,48 @@ int hv_3d_camera_fit_byte_cube(Hv3DCamera *camera, const HvByteCube3D *cube)
   radius = sqrtf((half_x * half_x) + (half_y * half_y) + (half_z * half_z));
 
   return hv_3d_camera_fit_sphere(camera, center_x, center_y, center_z, radius);
+}
+
+int hv_3d_camera_fit_byte_cube_overview(Hv3DCamera *camera, const HvByteCube3D *cube)
+{
+  if ((camera == 0) || (cube == 0)) {
+    return 0;
+  }
+  if (!hv_3d_camera_fit_byte_cube(camera, cube)) {
+    return 0;
+  }
+  if (cube->occupied_voxels == 0u) {
+    return 1;
+  }
+
+  camera->distance *= HV_3D_CAMERA_BYTE_CUBE_OVERVIEW_PAD;
+  if (camera->distance < HV_3D_CAMERA_BYTE_CUBE_OVERVIEW_MIN_DISTANCE) {
+    camera->distance = HV_3D_CAMERA_BYTE_CUBE_OVERVIEW_MIN_DISTANCE;
+  }
+  return hv_3d_camera_clamp_distance(camera);
+}
+
+int hv_3d_camera_preserve_scale_on_resize(Hv3DCamera *camera, uint32_t new_width, uint32_t new_height)
+{
+  uint32_t old_side = 0u;
+  uint32_t new_side = 0u;
+
+  if (camera == 0) {
+    return 0;
+  }
+
+  old_side = hv_3d_camera_shorter_side(camera->viewport_width, camera->viewport_height);
+  new_side = hv_3d_camera_shorter_side(new_width, new_height);
+  if (old_side == 0u) {
+    old_side = 1u;
+  }
+  if (new_side == 0u) {
+    new_side = 1u;
+  }
+
+  camera->distance *= (float)new_side / (float)old_side;
+  if (!hv_3d_camera_clamp_distance(camera)) {
+    return 0;
+  }
+  return hv_3d_camera_set_viewport(camera, new_width, new_height);
 }

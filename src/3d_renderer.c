@@ -63,26 +63,15 @@ static PFNGLDELETEBUFFERSPROC hv_glDeleteBuffers_ptr = 0;
 static const char hv_3d_volume_vertex_shader_src[] =
   "#version 120\n"
   "uniform float u_depth;\n"
+  "uniform mat4 u_view;\n"
+  "uniform float u_aspect;\n"
   "uniform vec3 u_bounds_min;\n"
   "uniform vec3 u_bounds_max;\n"
-  "uniform vec3 u_geom_min;\n"
-  "uniform vec3 u_geom_max;\n"
   "varying vec3 v_texcoord;\n"
-  "float clamp_unit(float v) {\n"
-  "  return clamp(v, 0.0, 1.0);\n"
-  "}\n"
   "void main(void) {\n"
-  "  float span_x = max(u_geom_max.x - u_geom_min.x, 1e-6);\n"
-  "  float span_y = max(u_geom_max.y - u_geom_min.y, 1e-6);\n"
-  "  float sx = clamp_unit((gl_Vertex.x - u_geom_min.x) / span_x);\n"
-  "  float sy = clamp_unit((gl_Vertex.y - u_geom_min.y) / span_y);\n"
-  "  float z = mix(u_geom_min.z, u_geom_max.z, u_depth);\n"
-  "  v_texcoord = vec3(\n"
-  "    mix(u_bounds_min.x, u_bounds_max.x, sx),\n"
-  "    mix(u_bounds_min.y, u_bounds_max.y, sy),\n"
-  "    mix(u_bounds_min.z, u_bounds_max.z, u_depth)\n"
-  "  );\n"
-  "  gl_Position = gl_ModelViewProjectionMatrix * vec4(gl_Vertex.x, gl_Vertex.y, z, 1.0);\n"
+  "  vec4 sample_point = u_view * vec4(gl_Vertex.x * u_aspect, gl_Vertex.y, (u_depth * 2.0) - 1.0, 1.0);\n"
+  "  v_texcoord = (sample_point.xyz * 0.5) + vec3(0.5);\n"
+  "  gl_Position = vec4(gl_Vertex.xy, 0.0, 1.0);\n"
   "}\n";
 
 static const char hv_3d_volume_fragment_shader_src[] =
@@ -91,7 +80,10 @@ static const char hv_3d_volume_fragment_shader_src[] =
   "uniform sampler3D u_position_tex;\n"
   "uniform float u_brightness;\n"
   "uniform float u_contrast;\n"
+  "uniform float u_alpha_scale;\n"
   "uniform int u_palette;\n"
+  "uniform vec3 u_bounds_min;\n"
+  "uniform vec3 u_bounds_max;\n"
   "varying vec3 v_texcoord;\n"
   "float clamp_unit(float v) {\n"
   "  return clamp(v, 0.0, 1.0);\n"
@@ -139,10 +131,15 @@ static const char hv_3d_volume_fragment_shader_src[] =
   "      (v_texcoord.x > 1.0) || (v_texcoord.y > 1.0) || (v_texcoord.z > 1.0)) {\n"
   "    discard;\n"
   "  }\n"
+  "  if ((v_texcoord.x < u_bounds_min.x) || (v_texcoord.y < u_bounds_min.y) || (v_texcoord.z < u_bounds_min.z) ||\n"
+  "      (v_texcoord.x > u_bounds_max.x) || (v_texcoord.y > u_bounds_max.y) || (v_texcoord.z > u_bounds_max.z)) {\n"
+  "    discard;\n"
+  "  }\n"
   "  density = texture3D(u_intensity_tex, v_texcoord).r;\n"
   "  pos = texture3D(u_position_tex, v_texcoord).rgb;\n"
   "  density = clamp_unit(density + u_brightness);\n"
   "  density = clamp_unit(((density - 0.5) * u_contrast) + 0.5);\n"
+  "  density = clamp_unit(density * u_alpha_scale);\n"
   "  if (density <= 0.001) {\n"
   "    discard;\n"
   "  }\n"
@@ -325,8 +322,11 @@ static int hv_3d_renderer_link_volume_program(Hv3DRenderer *renderer, char *err,
   renderer->volume_uniform_position = glGetUniformLocation(renderer->volume_program, "u_position_tex");
   renderer->volume_uniform_brightness = glGetUniformLocation(renderer->volume_program, "u_brightness");
   renderer->volume_uniform_contrast = glGetUniformLocation(renderer->volume_program, "u_contrast");
+  renderer->volume_uniform_alpha_scale = glGetUniformLocation(renderer->volume_program, "u_alpha_scale");
   renderer->volume_uniform_palette = glGetUniformLocation(renderer->volume_program, "u_palette");
   renderer->volume_uniform_depth = glGetUniformLocation(renderer->volume_program, "u_depth");
+  renderer->volume_uniform_view = glGetUniformLocation(renderer->volume_program, "u_view");
+  renderer->volume_uniform_aspect = glGetUniformLocation(renderer->volume_program, "u_aspect");
   renderer->volume_uniform_bounds_min = glGetUniformLocation(renderer->volume_program, "u_bounds_min");
   renderer->volume_uniform_bounds_max = glGetUniformLocation(renderer->volume_program, "u_bounds_max");
   renderer->volume_uniform_geom_min = glGetUniformLocation(renderer->volume_program, "u_geom_min");
@@ -464,10 +464,10 @@ static float hv_3d_renderer_camera_zoom(const Hv3DCamera *camera)
   }
 
   zoom = 3.0f / camera->distance;
-  if (zoom < 0.35f) {
-    zoom = 0.35f;
-  } else if (zoom > 4.0f) {
-    zoom = 4.0f;
+  if (zoom < 0.20f) {
+    zoom = 0.20f;
+  } else if (zoom > 12.0f) {
+    zoom = 12.0f;
   }
   return zoom;
 }
@@ -590,6 +590,135 @@ static void hv_3d_renderer_draw_byte_cube_outline(
   hv_3d_renderer_draw_outline_segment(minx, miny, minz, minx, miny, minz + axis_len_z);
   glEnd();
 }
+
+static void hv_3d_renderer_matrix_identity(float out[16])
+{
+  size_t i = 0u;
+
+  if (out == 0) {
+    return;
+  }
+  for (i = 0u; i < 16u; ++i) {
+    out[i] = 0.0f;
+  }
+  out[0] = 1.0f;
+  out[5] = 1.0f;
+  out[10] = 1.0f;
+  out[15] = 1.0f;
+}
+
+static void hv_3d_renderer_matrix_multiply(float out[16], const float a[16], const float b[16])
+{
+  float tmp[16];
+  size_t row = 0u;
+  size_t col = 0u;
+  size_t k = 0u;
+
+  if ((out == 0) || (a == 0) || (b == 0)) {
+    return;
+  }
+
+  for (col = 0u; col < 4u; ++col) {
+    for (row = 0u; row < 4u; ++row) {
+      float value = 0.0f;
+      for (k = 0u; k < 4u; ++k) {
+        value += a[(k * 4u) + row] * b[(col * 4u) + k];
+      }
+      tmp[(col * 4u) + row] = value;
+    }
+  }
+  memcpy(out, tmp, sizeof(tmp));
+}
+
+static void hv_3d_renderer_matrix_translate(float out[16], float x, float y, float z)
+{
+  hv_3d_renderer_matrix_identity(out);
+  if (out == 0) {
+    return;
+  }
+  out[12] = x;
+  out[13] = y;
+  out[14] = z;
+}
+
+static void hv_3d_renderer_matrix_scale(float out[16], float x, float y, float z)
+{
+  hv_3d_renderer_matrix_identity(out);
+  if (out == 0) {
+    return;
+  }
+  out[0] = x;
+  out[5] = y;
+  out[10] = z;
+}
+
+static void hv_3d_renderer_matrix_rotate_x(float out[16], float degrees)
+{
+  float radians = 0.0f;
+  float s = 0.0f;
+  float c = 0.0f;
+
+  hv_3d_renderer_matrix_identity(out);
+  if (out == 0) {
+    return;
+  }
+
+  radians = degrees * ((float)M_PI / 180.0f);
+  s = sinf(radians);
+  c = cosf(radians);
+  out[5] = c;
+  out[6] = s;
+  out[9] = -s;
+  out[10] = c;
+}
+
+static void hv_3d_renderer_matrix_rotate_y(float out[16], float degrees)
+{
+  float radians = 0.0f;
+  float s = 0.0f;
+  float c = 0.0f;
+
+  hv_3d_renderer_matrix_identity(out);
+  if (out == 0) {
+    return;
+  }
+
+  radians = degrees * ((float)M_PI / 180.0f);
+  s = sinf(radians);
+  c = cosf(radians);
+  out[0] = c;
+  out[2] = -s;
+  out[8] = s;
+  out[10] = c;
+}
+
+static void hv_3d_renderer_build_byte_cube_view_matrix(const Hv3DCamera *camera, float zoom, float out[16])
+{
+  float translate[16];
+  float rotate_x[16];
+  float rotate_y[16];
+  float scale[16];
+  float tmp[16];
+  float inv_zoom = 1.0f;
+
+  if ((camera == 0) || (out == 0)) {
+    return;
+  }
+
+  if (zoom > 1e-6f) {
+    inv_zoom = 1.0f / zoom;
+  }
+
+  hv_3d_renderer_matrix_translate(translate, camera->target_x, camera->target_y, camera->target_z);
+  hv_3d_renderer_matrix_rotate_y(rotate_y, -camera->yaw_degrees);
+  hv_3d_renderer_matrix_rotate_x(rotate_x, -camera->pitch_degrees);
+  hv_3d_renderer_matrix_scale(scale, inv_zoom, inv_zoom, inv_zoom);
+
+  hv_3d_renderer_matrix_multiply(tmp, rotate_y, rotate_x);
+  hv_3d_renderer_matrix_multiply(out, tmp, scale);
+  hv_3d_renderer_matrix_multiply(tmp, translate, out);
+  memcpy(out, tmp, sizeof(tmp));
+}
 #endif
 
 static void hv_3d_renderer_reset(Hv3DRenderer *renderer)
@@ -614,8 +743,11 @@ static void hv_3d_renderer_reset(Hv3DRenderer *renderer)
   renderer->volume_uniform_position = -1;
   renderer->volume_uniform_brightness = -1;
   renderer->volume_uniform_contrast = -1;
+  renderer->volume_uniform_alpha_scale = -1;
   renderer->volume_uniform_palette = -1;
   renderer->volume_uniform_depth = -1;
+  renderer->volume_uniform_view = -1;
+  renderer->volume_uniform_aspect = -1;
   renderer->volume_uniform_bounds_min = -1;
   renderer->volume_uniform_bounds_max = -1;
   renderer->volume_uniform_geom_min = -1;
@@ -893,6 +1025,69 @@ int hv_3d_byte_cube_palette_color(
   return 1;
 }
 
+float hv_3d_byte_cube_volume_alpha_scale(float zoom, Hv3DByteCubeBlendMode blend_mode)
+{
+  if (blend_mode != HV_3D_BYTE_CUBE_BLEND_ACCUMULATE) {
+    return 1.0f;
+  }
+  if (zoom <= 1.0f) {
+    return 1.0f;
+  }
+  {
+    float scaled = 1.0f / zoom;
+    if (scaled < 0.12f) {
+      scaled = 0.12f;
+    }
+    return hv_3d_byte_cube_clamp_unit(scaled);
+  }
+}
+
+unsigned int hv_3d_byte_cube_volume_layers(float zoom)
+{
+  const unsigned int base_layers = HV_BYTE_CUBE_SIDE * 4u;
+  unsigned int scale = 1u;
+
+  if (!isfinite((double)zoom) || (zoom <= 1.0f)) {
+    return base_layers;
+  }
+
+  scale = (unsigned int)ceilf(zoom * zoom);
+  if (scale < 1u) {
+    scale = 1u;
+  } else if (scale > 8u) {
+    scale = 8u;
+  }
+  return base_layers * scale;
+}
+
+int hv_3d_renderer_center_square_viewport(
+  uint32_t viewport_width,
+  uint32_t viewport_height,
+  int *x_out,
+  int *y_out,
+  uint32_t *side_out
+)
+{
+  uint32_t side = 0u;
+
+  if ((x_out == 0) || (y_out == 0) || (side_out == 0)) {
+    return 0;
+  }
+
+  if (viewport_width == 0u) {
+    viewport_width = 1u;
+  }
+  if (viewport_height == 0u) {
+    viewport_height = 1u;
+  }
+
+  side = (viewport_width < viewport_height) ? viewport_width : viewport_height;
+  *x_out = (int)((viewport_width - side) / 2u);
+  *y_out = (int)((viewport_height - side) / 2u);
+  *side_out = side;
+  return 1;
+}
+
 void hv_3d_byte_cube_view_settings_init_defaults(Hv3DByteCubeViewSettings *settings)
 {
   if (settings == 0) {
@@ -904,7 +1099,7 @@ void hv_3d_byte_cube_view_settings_init_defaults(Hv3DByteCubeViewSettings *setti
   settings->palette = HV_3D_BYTE_CUBE_PALETTE_RGB;
   settings->blend_mode = HV_3D_BYTE_CUBE_BLEND_ACCUMULATE;
   settings->projection = HV_3D_BYTE_CUBE_PROJECTION_FREE_3D;
-  settings->interpolation = HV_3D_BYTE_CUBE_INTERPOLATION_LINEAR;
+  settings->interpolation = HV_3D_BYTE_CUBE_INTERPOLATION_NEAREST;
   settings->position_interpolation = HV_3D_BYTE_CUBE_INTERPOLATION_NEAREST;
 }
 
@@ -1470,7 +1665,7 @@ int hv_3d_renderer_draw(
   double near_plane = 1.0;
   double far_plane = 10.0;
   double top = 0.75 * near_plane;
-  double right = top;
+  double right = 0.0;
 
   if ((renderer == 0) || (camera == 0)) {
     hv_set_error(err, err_size, "invalid arguments for 3D renderer draw");
@@ -1561,6 +1756,7 @@ int hv_3d_renderer_draw_byte_cube(
   float quad_half_width = 1.0f;
   float quad_half_height = 1.0f;
   float zoom = 1.0f;
+  float view_matrix[16];
   unsigned int layers = HV_BYTE_CUBE_SIDE * 4u;
   unsigned int i = 0u;
 
@@ -1580,7 +1776,6 @@ int hv_3d_renderer_draw_byte_cube(
     return 0;
   }
 
-  glViewport(0, 0, (GLsizei)viewport_width, (GLsizei)viewport_height);
   glClearColor(0.10f, 0.10f, 0.11f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -1589,15 +1784,17 @@ int hv_3d_renderer_draw_byte_cube(
   }
   aspect = (double)viewport_width / (double)viewport_height;
   if (use_free_camera) {
-    float geom_min_x = hv_3d_renderer_byte_cube_local_coord(renderer->tex_min_x);
-    float geom_min_y = hv_3d_renderer_byte_cube_local_coord(renderer->tex_min_y);
-    float geom_min_z = hv_3d_renderer_byte_cube_local_coord(renderer->tex_min_z);
-    float geom_max_x = hv_3d_renderer_byte_cube_local_coord(renderer->tex_max_x);
-    float geom_max_y = hv_3d_renderer_byte_cube_local_coord(renderer->tex_max_y);
-    float geom_max_z = hv_3d_renderer_byte_cube_local_coord(renderer->tex_max_z);
-
     zoom = hv_3d_renderer_camera_zoom(camera);
+    layers = hv_3d_byte_cube_volume_layers(zoom);
+    hv_3d_renderer_build_byte_cube_view_matrix(camera, zoom, view_matrix);
+    if ((renderer->volume_program == 0u) ||
+        (renderer->volume_texture_intensity == 0u) ||
+        (renderer->volume_texture_position == 0u)) {
+      hv_set_error(err, err_size, "byte-cube volume renderer is unavailable");
+      return 0;
+    }
     hv_3d_renderer_set_byte_cube_texture_filters(renderer, settings);
+    glViewport(0, 0, (GLsizei)viewport_width, (GLsizei)viewport_height);
     glEnable(GL_BLEND);
     if (settings->blend_mode == HV_3D_BYTE_CUBE_BLEND_ALPHA) {
       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1607,22 +1804,12 @@ int hv_3d_renderer_draw_byte_cube(
     glDisable(GL_DEPTH_TEST);
 
     glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
     glLoadIdentity();
-    glOrtho(-(GLdouble)aspect, (GLdouble)aspect, -1.0, 1.0, -1.0, 1.0);
 
     glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
     glLoadIdentity();
-    glScalef(zoom, zoom, zoom);
-    glRotatef(camera->pitch_degrees, 1.0f, 0.0f, 0.0f);
-    glRotatef(camera->yaw_degrees, 0.0f, 1.0f, 0.0f);
-    glTranslatef(-camera->target_x, -camera->target_y, -camera->target_z);
-
-    if ((renderer->volume_program == 0u) ||
-        (renderer->volume_texture_intensity == 0u) ||
-        (renderer->volume_texture_position == 0u)) {
-      hv_set_error(err, err_size, "byte-cube volume renderer is unavailable");
-      return 0;
-    }
 
     glUseProgram(renderer->volume_program);
     glActiveTexture(GL_TEXTURE0);
@@ -1633,7 +1820,10 @@ int hv_3d_renderer_draw_byte_cube(
     glUniform1i(renderer->volume_uniform_position, 1);
     glUniform1f(renderer->volume_uniform_brightness, settings->brightness);
     glUniform1f(renderer->volume_uniform_contrast, settings->contrast);
+    glUniform1f(renderer->volume_uniform_alpha_scale, hv_3d_byte_cube_volume_alpha_scale(zoom, settings->blend_mode));
     glUniform1i(renderer->volume_uniform_palette, (GLint)settings->palette);
+    glUniformMatrix4fv(renderer->volume_uniform_view, 1, GL_FALSE, view_matrix);
+    glUniform1f(renderer->volume_uniform_aspect, (float)aspect);
     glUniform3f(
       renderer->volume_uniform_bounds_min,
       renderer->tex_min_x,
@@ -1646,16 +1836,14 @@ int hv_3d_renderer_draw_byte_cube(
       renderer->tex_max_y,
       renderer->tex_max_z
     );
-    glUniform3f(renderer->volume_uniform_geom_min, geom_min_x, geom_min_y, geom_min_z);
-    glUniform3f(renderer->volume_uniform_geom_max, geom_max_x, geom_max_y, geom_max_z);
 
     for (i = 0u; i <= layers; ++i) {
       glUniform1f(renderer->volume_uniform_depth, (float)i / (float)layers);
       glBegin(GL_QUADS);
-      glVertex3f(geom_min_x, geom_min_y, 0.0f);
-      glVertex3f(geom_max_x, geom_min_y, 0.0f);
-      glVertex3f(geom_max_x, geom_max_y, 0.0f);
-      glVertex3f(geom_min_x, geom_max_y, 0.0f);
+      glVertex2f(-1.0f, -1.0f);
+      glVertex2f(1.0f, -1.0f);
+      glVertex2f(1.0f, 1.0f);
+      glVertex2f(-1.0f, 1.0f);
       glEnd();
     }
     glUseProgram(0u);
@@ -1664,6 +1852,19 @@ int hv_3d_renderer_draw_byte_cube(
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_3D, 0u);
     glDisable(GL_BLEND);
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glLoadIdentity();
+    glViewport(0, 0, (GLsizei)viewport_width, (GLsizei)viewport_height);
+    glOrtho(-aspect, aspect, -1.0, 1.0, -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glScalef(zoom, zoom, zoom);
+    glRotatef(camera->pitch_degrees, 1.0f, 0.0f, 0.0f);
+    glRotatef(camera->yaw_degrees, 0.0f, 1.0f, 0.0f);
+    glTranslatef(-camera->target_x, -camera->target_y, -camera->target_z);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     hv_3d_renderer_draw_byte_cube_outline(renderer, camera);

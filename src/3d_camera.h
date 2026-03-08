@@ -25,5 +25,7 @@ int hv_3d_camera_orbit(Hv3DCamera *camera, float delta_x, float delta_y);
 int hv_3d_camera_zoom(Hv3DCamera *camera, float wheel_delta);
 int hv_3d_camera_fit_cloud(Hv3DCamera *camera, const HvPointCloud3D *cloud);
 int hv_3d_camera_fit_byte_cube(Hv3DCamera *camera, const HvByteCube3D *cube);
+int hv_3d_camera_fit_byte_cube_overview(Hv3DCamera *camera, const HvByteCube3D *cube);
+int hv_3d_camera_preserve_scale_on_resize(Hv3DCamera *camera, uint32_t new_width, uint32_t new_height);
 
 #endif

@@ -29,6 +29,11 @@ int hv_3d_platform_viewer_requested(void);
 int hv_3d_platform_viewer_available(void);
 const char *hv_3d_platform_viewer_support_text(void);
 int hv_3d_platform_apply_byte_cube_control(Hv3DByteCubeViewSettings *settings, Hv3DByteCubeControl control);
+int hv_3d_platform_reset_byte_cube_view(
+  Hv3DByteCubeViewSettings *settings,
+  Hv3DCamera *camera,
+  const HvByteCube3D *cube
+);
 int hv_3d_platform_render_static_cloud(
   const HvPointCloud3D *cloud,
   const Hv3DCamera *camera,

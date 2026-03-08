@@ -77,6 +77,7 @@ const char *hv_3d_platform_viewer_support_text(void)
 typedef struct Hv3DViewerState {
   int dragging_left;
   int dragging_right;
+  int byte_cube_overview_active;
   int last_mouse_x;
   int last_mouse_y;
   uint32_t viewport_width;
@@ -248,6 +249,27 @@ int hv_3d_platform_apply_byte_cube_control(Hv3DByteCubeViewSettings *settings, H
   }
 }
 
+int hv_3d_platform_reset_byte_cube_view(
+  Hv3DByteCubeViewSettings *settings,
+  Hv3DCamera *camera,
+  const HvByteCube3D *cube
+)
+{
+  uint32_t viewport_width = 0u;
+  uint32_t viewport_height = 0u;
+
+  if ((settings == 0) || (camera == 0) || (cube == 0)) {
+    return 0;
+  }
+
+  viewport_width = camera->viewport_width;
+  viewport_height = camera->viewport_height;
+  hv_3d_byte_cube_view_settings_init_defaults(settings);
+  hv_3d_camera_init_defaults(camera);
+  (void)hv_3d_camera_set_viewport(camera, viewport_width, viewport_height);
+  return hv_3d_camera_fit_byte_cube_overview(camera, cube);
+}
+
 static int hv_3d_apply_byte_cube_key(Hv3DByteCubeViewSettings *settings, SDL_Keycode key)
 {
   switch (key) {
@@ -337,6 +359,9 @@ static int hv_3d_platform_render_scene(
   (void)hv_3d_camera_set_viewport(&camera_state, camera->viewport_width, camera->viewport_height);
   viewer_state.viewport_width = camera_state.viewport_width;
   viewer_state.viewport_height = camera_state.viewport_height;
+  viewer_state.byte_cube_overview_active =
+    (scene_kind == HV_3D_PLATFORM_SCENE_BYTE_CUBE) &&
+    (settings_state.projection == HV_3D_BYTE_CUBE_PROJECTION_FREE_3D);
   viewer_state.redraw_needed = 1;
   hidden_window = hv_parse_truthy_env("HILBERTVIZ3D_WINDOW_HIDDEN");
   if (!hv_parse_u32_env("HILBERTVIZ3D_RENDER_FRAMES", &render_frames, err, err_size)) {
@@ -430,6 +455,21 @@ static int hv_3d_platform_render_scene(
         running = 0;
       } else if ((scene_kind == HV_3D_PLATFORM_SCENE_BYTE_CUBE) &&
                  (event.type == SDL_KEYDOWN) &&
+                 (event.key.keysym.sym == SDLK_r)) {
+        if (!hv_3d_platform_reset_byte_cube_view(&settings_state, &camera_state, (const HvByteCube3D *)scene)) {
+          hv_3d_renderer_shutdown(&renderer);
+          SDL_GL_DeleteContext(context);
+          SDL_DestroyWindow(window);
+          if (need_video_quit) {
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+          }
+          hv_set_error(err, err_size, "failed to reset byte-cube view");
+          return 0;
+        }
+        viewer_state.byte_cube_overview_active = 1;
+        viewer_state.redraw_needed = 1;
+      } else if ((scene_kind == HV_3D_PLATFORM_SCENE_BYTE_CUBE) &&
+                 (event.type == SDL_KEYDOWN) &&
                  hv_3d_apply_byte_cube_key(&settings_state, event.key.keysym.sym)) {
         viewer_state.redraw_needed = 1;
       } else if ((event.type == SDL_MOUSEBUTTONDOWN) && (event.button.button == SDL_BUTTON_LEFT)) {
@@ -455,6 +495,7 @@ static int hv_3d_platform_render_scene(
         viewer_state.last_mouse_x = event.motion.x;
         viewer_state.last_mouse_y = event.motion.y;
         (void)hv_3d_camera_orbit(&camera_state, (float)dx, (float)dy);
+        viewer_state.byte_cube_overview_active = 0;
         viewer_state.redraw_needed = 1;
       } else if ((scene_kind == HV_3D_PLATFORM_SCENE_BYTE_CUBE) &&
                  (event.type == SDL_MOUSEMOTION) &&
@@ -476,6 +517,7 @@ static int hv_3d_platform_render_scene(
 #endif
         if (wheel_delta != 0.0f) {
           (void)hv_3d_camera_zoom(&camera_state, wheel_delta);
+          viewer_state.byte_cube_overview_active = 0;
           viewer_state.redraw_needed = 1;
         }
       } else if (event.type == SDL_WINDOWEVENT) {
@@ -485,11 +527,47 @@ static int hv_3d_platform_render_scene(
         ) {
           viewer_state.viewport_width = (event.window.data1 > 0) ? (uint32_t)event.window.data1 : 1u;
           viewer_state.viewport_height = (event.window.data2 > 0) ? (uint32_t)event.window.data2 : 1u;
-          (void)hv_3d_camera_set_viewport(
-            &camera_state,
-            viewer_state.viewport_width,
-            viewer_state.viewport_height
-          );
+          if ((scene_kind == HV_3D_PLATFORM_SCENE_BYTE_CUBE) &&
+              viewer_state.byte_cube_overview_active &&
+              (settings_state.projection == HV_3D_BYTE_CUBE_PROJECTION_FREE_3D)) {
+            (void)hv_3d_camera_set_viewport(
+              &camera_state,
+              viewer_state.viewport_width,
+              viewer_state.viewport_height
+            );
+            if (!hv_3d_camera_fit_byte_cube_overview(&camera_state, (const HvByteCube3D *)scene)) {
+              hv_3d_renderer_shutdown(&renderer);
+              SDL_GL_DeleteContext(context);
+              SDL_DestroyWindow(window);
+              if (need_video_quit) {
+                SDL_QuitSubSystem(SDL_INIT_VIDEO);
+              }
+              hv_set_error(err, err_size, "failed to refit byte-cube overview on resize");
+              return 0;
+            }
+          } else if ((scene_kind == HV_3D_PLATFORM_SCENE_BYTE_CUBE) &&
+                     (settings_state.projection == HV_3D_BYTE_CUBE_PROJECTION_FREE_3D)) {
+            if (!hv_3d_camera_preserve_scale_on_resize(
+                  &camera_state,
+                  viewer_state.viewport_width,
+                  viewer_state.viewport_height
+                )) {
+              hv_3d_renderer_shutdown(&renderer);
+              SDL_GL_DeleteContext(context);
+              SDL_DestroyWindow(window);
+              if (need_video_quit) {
+                SDL_QuitSubSystem(SDL_INIT_VIDEO);
+              }
+              hv_set_error(err, err_size, "failed to preserve byte-cube scale on resize");
+              return 0;
+            }
+          } else {
+            (void)hv_3d_camera_set_viewport(
+              &camera_state,
+              viewer_state.viewport_width,
+              viewer_state.viewport_height
+            );
+          }
           viewer_state.redraw_needed = 1;
         } else if (
           (event.window.event == SDL_WINDOWEVENT_EXPOSED) ||

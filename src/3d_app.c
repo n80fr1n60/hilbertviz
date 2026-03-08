@@ -355,9 +355,9 @@ int hv_3d_run_app(int argc, char **argv)
       return 1;
     }
     hv_3d_camera_init_defaults(&camera);
-    if (!hv_3d_camera_fit_byte_cube(&camera, &byte_cube)) {
+    if (!hv_3d_camera_fit_byte_cube_overview(&camera, &byte_cube)) {
       hv_free_byte_cube3d(&byte_cube);
-      (void)fprintf(stderr, "hilbertviz3d failed: failed to fit initial byte-cube camera\n");
+      (void)fprintf(stderr, "hilbertviz3d failed: failed to fit initial byte-cube overview camera\n");
       return 1;
     }
     if (hv_3d_platform_viewer_available() && !hv3d_skip_viewer()) {

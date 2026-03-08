@@ -674,7 +674,7 @@ static void test_3d_camera_pitch_and_distance_clamps(void)
 
   camera.distance = 0.1f;
   TEST_CHECK(hv_3d_camera_clamp_distance(&camera));
-  TEST_CHECK(test_abs_double((double)camera.distance - 0.75) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.distance - 0.20) < 1e-6);
 
   camera.distance = 100.0f;
   TEST_CHECK(hv_3d_camera_clamp_distance(&camera));
@@ -725,6 +725,43 @@ static void test_3d_camera_fit_byte_cube_bounds(void)
   TEST_CHECK(test_abs_double((double)camera.distance - 0.9) < 1e-6);
 }
 
+static void test_3d_camera_fit_byte_cube_overview(void)
+{
+  Hv3DCamera fitted;
+  Hv3DCamera overview;
+  HvByteCube3D cube;
+
+  memset(&fitted, 0, sizeof(fitted));
+  memset(&overview, 0, sizeof(overview));
+  memset(&cube, 0, sizeof(cube));
+
+  hv_3d_camera_init_defaults(&fitted);
+  hv_3d_camera_init_defaults(&overview);
+  fitted.viewport_width = 800u;
+  fitted.viewport_height = 600u;
+  overview.viewport_width = 800u;
+  overview.viewport_height = 600u;
+  cube.side = HV_BYTE_CUBE_SIDE;
+  cube.total_voxels = HV_BYTE_CUBE_TOTAL_VOXELS;
+  cube.occupied_voxels = 2u;
+  cube.occupied_min_x = 0x41u;
+  cube.occupied_max_x = 0x42u;
+  cube.occupied_min_y = 0x42u;
+  cube.occupied_max_y = 0x43u;
+  cube.occupied_min_z = 0x43u;
+  cube.occupied_max_z = 0x44u;
+
+  TEST_CHECK(hv_3d_camera_fit_byte_cube(&fitted, &cube));
+  TEST_CHECK(hv_3d_camera_fit_byte_cube_overview(&overview, &cube));
+  TEST_CHECK(test_abs_double((double)overview.target_x - (double)fitted.target_x) < 1e-6);
+  TEST_CHECK(test_abs_double((double)overview.target_y - (double)fitted.target_y) < 1e-6);
+  TEST_CHECK(test_abs_double((double)overview.target_z - (double)fitted.target_z) < 1e-6);
+  TEST_CHECK(overview.distance > fitted.distance);
+  TEST_CHECK(overview.distance >= 2.5f);
+  TEST_CHECK(!hv_3d_camera_fit_byte_cube_overview(0, &cube));
+  TEST_CHECK(!hv_3d_camera_fit_byte_cube_overview(&overview, 0));
+}
+
 static void test_3d_camera_orbit_and_zoom(void)
 {
   Hv3DCamera camera;
@@ -758,6 +795,30 @@ static void test_3d_camera_repeated_orbit_stays_finite(void)
   TEST_CHECK(camera.pitch_degrees <= 85.0f);
 }
 
+static void test_3d_camera_preserve_scale_on_resize(void)
+{
+  Hv3DCamera camera;
+
+  memset(&camera, 0, sizeof(camera));
+  hv_3d_camera_init_defaults(&camera);
+  camera.viewport_width = 800u;
+  camera.viewport_height = 600u;
+  camera.distance = 3.0f;
+
+  TEST_CHECK(hv_3d_camera_preserve_scale_on_resize(&camera, 1600u, 1200u));
+  TEST_CHECK(camera.viewport_width == 1600u);
+  TEST_CHECK(camera.viewport_height == 1200u);
+  TEST_CHECK(test_abs_double((double)camera.distance - 6.0) < 1e-6);
+
+  TEST_CHECK(hv_3d_camera_preserve_scale_on_resize(&camera, 800u, 600u));
+  TEST_CHECK(test_abs_double((double)camera.distance - 3.0) < 1e-6);
+
+  TEST_CHECK(hv_3d_camera_preserve_scale_on_resize(&camera, 1600u, 600u));
+  TEST_CHECK(test_abs_double((double)camera.distance - 3.0) < 1e-6);
+
+  TEST_CHECK(!hv_3d_camera_preserve_scale_on_resize(0, 800u, 600u));
+}
+
 static void test_3d_camera_fit_then_interact_stays_valid(void)
 {
   Hv3DCamera camera;
@@ -784,7 +845,7 @@ static void test_3d_camera_fit_then_interact_stays_valid(void)
   TEST_CHECK(test_abs_double((double)camera.target_z - 0.5) < 1e-6);
   TEST_CHECK(camera.pitch_degrees >= -85.0f);
   TEST_CHECK(camera.pitch_degrees <= 85.0f);
-  TEST_CHECK(camera.distance >= 0.75f);
+  TEST_CHECK(camera.distance >= 0.20f);
   TEST_CHECK(camera.distance <= 24.0f);
 }
 
@@ -881,6 +942,27 @@ static void test_3d_renderer_byte_cube_alpha_helper(void)
     hv_3d_renderer_byte_cube_alpha(5u, 9u, &settings) >=
     hv_3d_renderer_byte_cube_alpha(1u, 9u, &settings)
   );
+  TEST_CHECK(test_abs_float(hv_3d_byte_cube_volume_alpha_scale(1.0f, HV_3D_BYTE_CUBE_BLEND_ACCUMULATE) - 1.0f) < 1e-6f);
+  TEST_CHECK(test_abs_float(hv_3d_byte_cube_volume_alpha_scale(4.0f, HV_3D_BYTE_CUBE_BLEND_ACCUMULATE) - 0.25f) < 1e-6f);
+  TEST_CHECK(test_abs_float(hv_3d_byte_cube_volume_alpha_scale(4.0f, HV_3D_BYTE_CUBE_BLEND_ALPHA) - 1.0f) < 1e-6f);
+  TEST_CHECK(hv_3d_byte_cube_volume_layers(1.0f) == (HV_BYTE_CUBE_SIDE * 4u));
+  TEST_CHECK(hv_3d_byte_cube_volume_layers(2.0f) == (HV_BYTE_CUBE_SIDE * 16u));
+  TEST_CHECK(hv_3d_byte_cube_volume_layers(10.0f) == (HV_BYTE_CUBE_SIDE * 32u));
+  {
+    int viewport_x = 0;
+    int viewport_y = 0;
+    uint32_t viewport_side = 0u;
+
+    TEST_CHECK(hv_3d_renderer_center_square_viewport(1280u, 720u, &viewport_x, &viewport_y, &viewport_side));
+    TEST_CHECK(viewport_x == 280);
+    TEST_CHECK(viewport_y == 0);
+    TEST_CHECK(viewport_side == 720u);
+    TEST_CHECK(hv_3d_renderer_center_square_viewport(600u, 900u, &viewport_x, &viewport_y, &viewport_side));
+    TEST_CHECK(viewport_x == 0);
+    TEST_CHECK(viewport_y == 150);
+    TEST_CHECK(viewport_side == 600u);
+    TEST_CHECK(!hv_3d_renderer_center_square_viewport(640u, 480u, 0, &viewport_y, &viewport_side));
+  }
 }
 
 static void test_3d_byte_cube_view_settings_defaults_and_validation(void)
@@ -903,7 +985,8 @@ static void test_3d_byte_cube_view_settings_defaults_and_validation(void)
   TEST_CHECK(settings.palette == HV_3D_BYTE_CUBE_PALETTE_RGB);
   TEST_CHECK(settings.blend_mode == HV_3D_BYTE_CUBE_BLEND_ACCUMULATE);
   TEST_CHECK(settings.projection == HV_3D_BYTE_CUBE_PROJECTION_FREE_3D);
-  TEST_CHECK(settings.interpolation == HV_3D_BYTE_CUBE_INTERPOLATION_LINEAR);
+  TEST_CHECK(settings.interpolation == HV_3D_BYTE_CUBE_INTERPOLATION_NEAREST);
+  TEST_CHECK(settings.position_interpolation == HV_3D_BYTE_CUBE_INTERPOLATION_NEAREST);
   TEST_CHECK(hv_3d_byte_cube_view_settings_validate(&settings, err, sizeof(err)));
   TEST_CHECK(strcmp(hv_3d_byte_cube_palette_name(HV_3D_BYTE_CUBE_PALETTE_HEAT), "heat") == 0);
   TEST_CHECK(strcmp(hv_3d_byte_cube_blend_mode_name(HV_3D_BYTE_CUBE_BLEND_ALPHA), "alpha") == 0);
@@ -1304,6 +1387,52 @@ static void test_3d_platform_byte_cube_controls(void)
 
   TEST_CHECK(!hv_3d_platform_apply_byte_cube_control(0, HV_3D_BYTE_CUBE_CONTROL_RESET));
   TEST_CHECK(!hv_3d_platform_apply_byte_cube_control(&settings, (Hv3DByteCubeControl)99));
+}
+
+static void test_3d_platform_reset_byte_cube_view(void)
+{
+  Hv3DByteCubeViewSettings settings;
+  Hv3DCamera camera;
+  HvByteCube3D cube;
+
+  memset(&settings, 0, sizeof(settings));
+  memset(&camera, 0, sizeof(camera));
+  memset(&cube, 0, sizeof(cube));
+
+  hv_3d_byte_cube_view_settings_init_defaults(&settings);
+  hv_3d_camera_init_defaults(&camera);
+
+  settings.brightness = 0.4f;
+  settings.contrast = 2.0f;
+  settings.palette = HV_3D_BYTE_CUBE_PALETTE_MONO;
+  camera.yaw_degrees = 123.0f;
+  camera.pitch_degrees = -40.0f;
+  camera.distance = 5.0f;
+  camera.viewport_width = 800u;
+  camera.viewport_height = 600u;
+  cube.side = HV_BYTE_CUBE_SIDE;
+  cube.total_voxels = HV_BYTE_CUBE_TOTAL_VOXELS;
+  cube.occupied_voxels = 2u;
+  cube.occupied_min_x = 0x41u;
+  cube.occupied_max_x = 0x42u;
+  cube.occupied_min_y = 0x42u;
+  cube.occupied_max_y = 0x43u;
+  cube.occupied_min_z = 0x43u;
+  cube.occupied_max_z = 0x44u;
+
+  TEST_CHECK(hv_3d_platform_reset_byte_cube_view(&settings, &camera, &cube));
+  TEST_CHECK(test_abs_float(settings.brightness - 0.0f) < 1e-6f);
+  TEST_CHECK(test_abs_float(settings.contrast - 1.0f) < 1e-6f);
+  TEST_CHECK(settings.palette == HV_3D_BYTE_CUBE_PALETTE_RGB);
+  TEST_CHECK(settings.projection == HV_3D_BYTE_CUBE_PROJECTION_FREE_3D);
+  TEST_CHECK(test_abs_float(camera.yaw_degrees - 35.0f) < 1e-6f);
+  TEST_CHECK(test_abs_float(camera.pitch_degrees - 25.0f) < 1e-6f);
+  TEST_CHECK(camera.viewport_width == 800u);
+  TEST_CHECK(camera.viewport_height == 600u);
+  TEST_CHECK(camera.distance >= 2.5f);
+  TEST_CHECK(!hv_3d_platform_reset_byte_cube_view(0, &camera, &cube));
+  TEST_CHECK(!hv_3d_platform_reset_byte_cube_view(&settings, 0, &cube));
+  TEST_CHECK(!hv_3d_platform_reset_byte_cube_view(&settings, &camera, 0));
 }
 
 static void test_hilbert3d_bijection_and_adjacency(void)
@@ -2532,7 +2661,7 @@ static void test_render_auto_paginate_large_uses_default_page_order(void)
   char page1_path[192];
   char page2_path[192];
   const off_t large_size = (off_t)((1u << 24u) + 1u);
-  const char *ext = ".ppm";
+  const char *ext = 0;
   int input_fd = -1;
   int output_fd = -1;
   HvRenderOptions options;
@@ -2546,6 +2675,8 @@ static void test_render_auto_paginate_large_uses_default_page_order(void)
 
 #ifdef HV_TEST_HAVE_PNG
   ext = ".png";
+#else
+  ext = ".ppm";
 #endif
 
   input_fd = mkstemp(input_template);
@@ -4166,10 +4297,12 @@ int main(void)
   test_3d_camera_fit_cloud_large();
   test_3d_camera_fit_byte_cube_empty();
   test_3d_camera_fit_byte_cube_bounds();
+  test_3d_camera_fit_byte_cube_overview();
   test_3d_camera_viewport_update();
   test_3d_camera_pitch_and_distance_clamps();
   test_3d_camera_orbit_and_zoom();
   test_3d_camera_repeated_orbit_stays_finite();
+  test_3d_camera_preserve_scale_on_resize();
   test_3d_camera_fit_then_interact_stays_valid();
   test_3d_renderer_summary_output();
   test_3d_renderer_byte_cube_alpha_helper();
@@ -4177,6 +4310,7 @@ int main(void)
   test_3d_renderer_invalid_arguments();
   test_3d_platform_invalid_arguments();
   test_3d_platform_byte_cube_controls();
+  test_3d_platform_reset_byte_cube_view();
   test_point_cloud3d_empty_slice();
   test_point_cloud3d_small_deterministic();
   test_point_cloud3d_near_capacity_slice();

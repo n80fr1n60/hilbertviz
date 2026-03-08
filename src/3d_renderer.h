@@ -71,6 +71,7 @@ int hv_3d_byte_cube_palette_color(
   float *g_out,
   float *b_out
 );
+float hv_3d_byte_cube_volume_alpha_scale(float zoom, Hv3DByteCubeBlendMode blend_mode);
 
 typedef struct Hv3DRenderer {
   float tex_min_x;
@@ -92,6 +93,9 @@ typedef struct Hv3DRenderer {
   int volume_uniform_contrast;
   int volume_uniform_palette;
   int volume_uniform_depth;
+  int volume_uniform_alpha_scale;
+  int volume_uniform_view;
+  int volume_uniform_aspect;
   int volume_uniform_bounds_min;
   int volume_uniform_bounds_max;
   int volume_uniform_geom_min;
@@ -138,6 +142,14 @@ float hv_3d_byte_cube_density_transfer(
   uint32_t max_density,
   float brightness,
   float contrast
+);
+unsigned int hv_3d_byte_cube_volume_layers(float zoom);
+int hv_3d_renderer_center_square_viewport(
+  uint32_t viewport_width,
+  uint32_t viewport_height,
+  int *x_out,
+  int *y_out,
+  uint32_t *side_out
 );
 uint8_t hv_3d_renderer_byte_cube_alpha(
   uint32_t count,

@@ -259,6 +259,11 @@ int hv_build_point_cloud3d(
       return 0;
     }
   }
+  if ((point_count > 0u) && (points == 0)) {
+    hv_set_error(err, err_size, "failed to allocate point storage");
+    (void)hv_close_input_stream(&stream, 0, 0u);
+    return 0;
+  }
 
   while (total_written < point_count) {
     size_t chunk_size = point_count - total_written;
