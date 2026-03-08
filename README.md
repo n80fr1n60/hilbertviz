@@ -7,7 +7,7 @@
 - Linux-focused C11 implementation.
 - Auto-sized Hilbert grid (`2^order x 2^order`) or manual `--order`.
 - Optional rectangular generalized traversal (`--layout rect-hilbert --dimensions WxH`).
-- Experimental `hilbertviz3d` point-cloud pipeline for selected file slices.
+- Experimental `hilbertviz3d` binary-visualization pipeline for selected file slices.
 - Static 3D viewer auto-fits the initial camera to occupied cloud bounds.
 - Optional `--offset` / `--length` slicing for large files.
 - Optional pagination (`--paginate`) for very large inputs.
@@ -165,6 +165,8 @@ Experimental 3D scaffold:
 
 ```bash
 ./build/src/hilbertviz3d input.bin --order 5
+./build/src/hilbertviz3d input.bin --mode hilbert --order 5
+./build/src/hilbertviz3d input.bin --mode byte-cube
 ./build/src/hilbertviz3d input.bin --order 5 --offset 4096 --length 65536
 ./build/src/hilbertviz3d input.bin --order 5 --point-size 4
 ./build/src/hilbertviz3d --help
@@ -172,8 +174,14 @@ Experimental 3D scaffold:
 
 Notes:
 
-- `hilbertviz3d` opens a static 3D point viewer when SDL2/OpenGL support is available.
+- `hilbertviz3d` currently supports explicit modes:
+  - `hilbert`: implemented
+  - `byte-cube`: implemented as a trigram density-volume summary plus slice viewer
+- current default mode is `hilbert`
+- `hilbertviz3d` opens an SDL/OpenGL viewer when support is available.
 - `hilbertviz3d` currently supports 3D orders `1..8`.
+- `byte-cube` opens a slice-based density viewer when SDL2/OpenGL support is available.
+- `byte-cube` uses a dense `256 x 256 x 256` trigram volume and is capped by default at `64 MiB`.
 - `hilbertviz3d` fits the initial view to the occupied point-cloud bounds.
 - Controls:
   - left-drag: orbit
@@ -201,6 +209,8 @@ Help:
 - Override full-buffer cap with `HILBERTVIZ_MAX_SLICE_BYTES=<bytes>` (`0` disables cap).
 - 3D point-cloud allocation is capped by default (`256 MiB`) and fails fast when exceeded.
 - Override 3D point-cloud cap with `HILBERTVIZ_MAX_POINT_CLOUD_BYTES=<bytes>` (`0` disables cap).
+- 3D byte-cube allocation is capped by default (`64 MiB`) and fails fast when exceeded.
+- Override 3D byte-cube cap with `HILBERTVIZ_MAX_BYTE_CUBE_BYTES=<bytes>` (`0` disables cap).
 - Numeric CLI values are strict unsigned decimal (`+`/`-` forms are rejected).
 - Slice validation uses `fstat` on the opened file descriptor to avoid path-race validation gaps.
 - Output targets must be regular files or character devices; symlinks/FIFOs/sockets are rejected.
@@ -213,7 +223,7 @@ Help:
 - For multi-page output, files are named with `_pageNNNN` suffixes.
 - `--layout hilbert` is canonical square Hilbert (`2^n x 2^n`).
 - `--layout rect-hilbert` is a generalized rectangular Hilbert-like traversal.
-- `hilbertviz3d` currently opens an SDL/OpenGL point viewer after building the normalized colored 3D point cloud, fitting the initial camera to the occupied bounds, and printing a summary.
+- `hilbertviz3d` currently opens an SDL/OpenGL viewer after building the selected 3D scene, printing its summary, and initializing the viewer state.
 - `--point-size <pixels>` controls rendered point size for `hilbertviz3d`.
 - SDL2/OpenGL viewer dependency detection is optional and controlled by `HILBERTVIZ_WITH_3D_VIEWER`.
 - `--entropy` prints Shannon entropy for the exact rendered slice in bits/byte.

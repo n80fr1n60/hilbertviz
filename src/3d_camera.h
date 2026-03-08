@@ -1,6 +1,7 @@
 #ifndef HV_3D_CAMERA_H
 #define HV_3D_CAMERA_H
 
+#include "byte_cube.h"
 #include "point_cloud3d.h"
 
 #include <stdint.h>
@@ -23,5 +24,6 @@ int hv_3d_camera_clamp_distance(Hv3DCamera *camera);
 int hv_3d_camera_orbit(Hv3DCamera *camera, float delta_x, float delta_y);
 int hv_3d_camera_zoom(Hv3DCamera *camera, float wheel_delta);
 int hv_3d_camera_fit_cloud(Hv3DCamera *camera, const HvPointCloud3D *cloud);
+int hv_3d_camera_fit_byte_cube(Hv3DCamera *camera, const HvByteCube3D *cube);
 
 #endif

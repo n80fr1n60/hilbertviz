@@ -1,4 +1,5 @@
 add_library(hvcore STATIC
+  byte_cube.c
   file_io.c
   hilbert.c
   hilbert3d.c
@@ -24,6 +25,7 @@ target_link_libraries(hilbertviz PRIVATE hvcore)
 add_library(hv3dapp STATIC
   3d_app.c
   3d_camera.c
+  3d_mode.c
   3d_platform.c
   3d_renderer.c
 )

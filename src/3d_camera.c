@@ -10,6 +10,52 @@ static const float HV_3D_CAMERA_ORBIT_DEGREES_PER_PIXEL = 0.30f;
 static const float HV_3D_CAMERA_ZOOM_FRACTION_PER_WHEEL = 0.12f;
 static const float HV_3D_CAMERA_ZOOM_MIN_STEP = 0.25f;
 
+static float hv_normalize_byte_cube_coord(uint8_t coord)
+{
+  return ((((float)coord + 0.5f) / (float)HV_BYTE_CUBE_SIDE) * 2.0f) - 1.0f;
+}
+
+static int hv_3d_camera_fit_sphere(Hv3DCamera *camera, float center_x, float center_y, float center_z, float radius)
+{
+  float aspect = 1.0f;
+  float top = 0.75f;
+  float right = top;
+  float min_half_extent = top;
+  float fitted_distance = 0.0f;
+
+  if (camera == 0) {
+    return 0;
+  }
+
+  (void)hv_3d_camera_set_viewport(camera, camera->viewport_width, camera->viewport_height);
+  camera->target_x = center_x;
+  camera->target_y = center_y;
+  camera->target_z = center_z;
+
+  if (radius <= 0.0f) {
+    return 1;
+  }
+
+  if (camera->viewport_height > 0u) {
+    aspect = (float)camera->viewport_width / (float)camera->viewport_height;
+  }
+  right = top * aspect;
+  if ((right > 0.0f) && (right < min_half_extent)) {
+    min_half_extent = right;
+  }
+  if (min_half_extent <= 0.0f) {
+    min_half_extent = top;
+  }
+
+  fitted_distance = (radius * 1.25f) / min_half_extent;
+  if (fitted_distance < 0.9f) {
+    fitted_distance = 0.9f;
+  }
+
+  camera->distance = fitted_distance;
+  return hv_3d_camera_clamp_distance(camera);
+}
+
 void hv_3d_camera_init_defaults(Hv3DCamera *camera)
 {
   if (camera == 0) {
@@ -97,42 +143,59 @@ int hv_3d_camera_zoom(Hv3DCamera *camera, float wheel_delta)
 
 int hv_3d_camera_fit_cloud(Hv3DCamera *camera, const HvPointCloud3D *cloud)
 {
-  float aspect = 1.0f;
-  float top = 0.75f;
-  float right = top;
-  float min_half_extent = top;
-  float fitted_distance = 0.0f;
-
   if ((camera == 0) || (cloud == 0)) {
     return 0;
   }
 
-  (void)hv_3d_camera_set_viewport(camera, camera->viewport_width, camera->viewport_height);
+  return hv_3d_camera_fit_sphere(
+    camera,
+    cloud->bounds.center_x,
+    cloud->bounds.center_y,
+    cloud->bounds.center_z,
+    ((cloud->count == 0u) ? 0.0f : cloud->bounds.radius)
+  );
+}
 
-  camera->target_x = cloud->bounds.center_x;
-  camera->target_y = cloud->bounds.center_y;
-  camera->target_z = cloud->bounds.center_z;
+int hv_3d_camera_fit_byte_cube(Hv3DCamera *camera, const HvByteCube3D *cube)
+{
+  float min_x = 0.0f;
+  float min_y = 0.0f;
+  float min_z = 0.0f;
+  float max_x = 0.0f;
+  float max_y = 0.0f;
+  float max_z = 0.0f;
+  float center_x = 0.0f;
+  float center_y = 0.0f;
+  float center_z = 0.0f;
+  float half_x = 0.0f;
+  float half_y = 0.0f;
+  float half_z = 0.0f;
+  float radius = 0.0f;
 
-  if ((cloud->count == 0u) || (cloud->bounds.radius <= 0.0f)) {
-    return 1;
+  if ((camera == 0) || (cube == 0)) {
+    return 0;
+  }
+  if ((cube->side != HV_BYTE_CUBE_SIDE) || (cube->total_voxels != HV_BYTE_CUBE_TOTAL_VOXELS)) {
+    return 0;
+  }
+  if (cube->occupied_voxels == 0u) {
+    return hv_3d_camera_fit_sphere(camera, 0.0f, 0.0f, 0.0f, 0.0f);
   }
 
-  if (camera->viewport_height > 0u) {
-    aspect = (float)camera->viewport_width / (float)camera->viewport_height;
-  }
-  right = top * aspect;
-  if ((right > 0.0f) && (right < min_half_extent)) {
-    min_half_extent = right;
-  }
-  if (min_half_extent <= 0.0f) {
-    min_half_extent = top;
-  }
+  min_x = hv_normalize_byte_cube_coord(cube->occupied_min_x);
+  min_y = hv_normalize_byte_cube_coord(cube->occupied_min_y);
+  min_z = hv_normalize_byte_cube_coord(cube->occupied_min_z);
+  max_x = hv_normalize_byte_cube_coord(cube->occupied_max_x);
+  max_y = hv_normalize_byte_cube_coord(cube->occupied_max_y);
+  max_z = hv_normalize_byte_cube_coord(cube->occupied_max_z);
 
-  fitted_distance = (cloud->bounds.radius * 1.25f) / min_half_extent;
-  if (fitted_distance < 1.5f) {
-    fitted_distance = 1.5f;
-  }
+  center_x = (min_x + max_x) * 0.5f;
+  center_y = (min_y + max_y) * 0.5f;
+  center_z = (min_z + max_z) * 0.5f;
+  half_x = (max_x - min_x) * 0.5f;
+  half_y = (max_y - min_y) * 0.5f;
+  half_z = (max_z - min_z) * 0.5f;
+  radius = sqrtf((half_x * half_x) + (half_y * half_y) + (half_z * half_z));
 
-  camera->distance = fitted_distance;
-  return hv_3d_camera_clamp_distance(camera);
+  return hv_3d_camera_fit_sphere(camera, center_x, center_y, center_z, radius);
 }

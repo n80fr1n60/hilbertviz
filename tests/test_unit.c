@@ -1,6 +1,8 @@
 #include "3d_camera.h"
+#include "3d_mode.h"
 #include "3d_platform.h"
 #include "3d_renderer.h"
+#include "byte_cube.h"
 #include "file_io.h"
 #include "hilbert.h"
 #include "hilbert3d.h"
@@ -98,6 +100,489 @@ static double test_normalized_axis(uint32_t coord, uint32_t side)
   return ((((double)coord + 0.5) / (double)side) * 2.0) - 1.0;
 }
 
+static uint32_t test_byte_cube_voxel(const HvByteCube3D *cube, uint8_t x, uint8_t y, uint8_t z)
+{
+  size_t idx = ((((size_t)x * (size_t)HV_BYTE_CUBE_SIDE) + (size_t)y) * (size_t)HV_BYTE_CUBE_SIDE) + (size_t)z;
+
+  TEST_CHECK(cube != 0);
+  TEST_CHECK(cube->voxels != 0);
+  TEST_CHECK(idx < (size_t)cube->total_voxels);
+  return cube->voxels[idx];
+}
+
+static float test_abs_float(float value)
+{
+  return (value < 0.0f) ? -value : value;
+}
+
+static void test_3d_mode_helpers(void)
+{
+  Hv3DMode mode = (Hv3DMode)99;
+
+  TEST_CHECK(strcmp(hv_3d_mode_name(HV_3D_MODE_HILBERT), "hilbert") == 0);
+  TEST_CHECK(strcmp(hv_3d_mode_name(HV_3D_MODE_BYTE_CUBE), "byte-cube") == 0);
+  TEST_CHECK(strcmp(hv_3d_mode_name((Hv3DMode)99), "unknown") == 0);
+
+  TEST_CHECK(hv_3d_parse_mode("hilbert", &mode));
+  TEST_CHECK(mode == HV_3D_MODE_HILBERT);
+
+  TEST_CHECK(hv_3d_parse_mode("byte-cube", &mode));
+  TEST_CHECK(mode == HV_3D_MODE_BYTE_CUBE);
+
+  TEST_CHECK(!hv_3d_parse_mode("nope", &mode));
+  TEST_CHECK(!hv_3d_parse_mode(0, &mode));
+  TEST_CHECK(!hv_3d_parse_mode("hilbert", 0));
+}
+
+static void test_byte_cube_empty_slice(void)
+{
+  char input_template[] = "/tmp/hv_byte_cube_empty_XXXXXX";
+  HvByteCube3D cube;
+  int input_fd = -1;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_build_byte_cube3d(input_template, 0u, 1, 0u, &cube, err, sizeof(err)));
+  TEST_CHECK(cube.voxels != 0);
+  TEST_CHECK(cube.side == HV_BYTE_CUBE_SIDE);
+  TEST_CHECK(cube.total_voxels == HV_BYTE_CUBE_TOTAL_VOXELS);
+  TEST_CHECK(cube.trigram_count == 0u);
+  TEST_CHECK(cube.occupied_voxels == 0u);
+  TEST_CHECK(cube.max_density == 0u);
+
+  hv_free_byte_cube3d(&cube);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_byte_cube_one_byte_input(void)
+{
+  char input_template[] = "/tmp/hv_byte_cube_one_XXXXXX";
+  const uint8_t payload[] = {0x41u};
+  HvByteCube3D cube;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_build_byte_cube3d(input_template, 0u, 0, 0u, &cube, err, sizeof(err)));
+  TEST_CHECK(cube.trigram_count == 0u);
+  TEST_CHECK(cube.occupied_voxels == 0u);
+  TEST_CHECK(cube.max_density == 0u);
+
+  hv_free_byte_cube3d(&cube);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_byte_cube_two_byte_input(void)
+{
+  char input_template[] = "/tmp/hv_byte_cube_short_XXXXXX";
+  const uint8_t payload[] = {0x41u, 0x42u};
+  HvByteCube3D cube;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_build_byte_cube3d(input_template, 0u, 0, 0u, &cube, err, sizeof(err)));
+  TEST_CHECK(cube.trigram_count == 0u);
+  TEST_CHECK(cube.occupied_voxels == 0u);
+  TEST_CHECK(cube.max_density == 0u);
+
+  hv_free_byte_cube3d(&cube);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_byte_cube_exact_trigram(void)
+{
+  char input_template[] = "/tmp/hv_byte_cube_exact_XXXXXX";
+  const uint8_t payload[] = {0x41u, 0x42u, 0x43u};
+  HvByteCube3D cube;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_build_byte_cube3d(input_template, 0u, 0, 0u, &cube, err, sizeof(err)));
+  TEST_CHECK(cube.trigram_count == 1u);
+  TEST_CHECK(cube.occupied_voxels == 1u);
+  TEST_CHECK(cube.max_density == 1u);
+  TEST_CHECK(cube.max_x == 0x41u);
+  TEST_CHECK(cube.max_y == 0x42u);
+  TEST_CHECK(cube.max_z == 0x43u);
+  TEST_CHECK(test_byte_cube_voxel(&cube, 0x41u, 0x42u, 0x43u) == 1u);
+
+  hv_free_byte_cube3d(&cube);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_byte_cube_overlapping_trigrams(void)
+{
+  char input_template[] = "/tmp/hv_byte_cube_overlap_XXXXXX";
+  const uint8_t payload[] = {0x41u, 0x41u, 0x41u, 0x41u};
+  HvByteCube3D cube;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_build_byte_cube3d(input_template, 0u, 0, 0u, &cube, err, sizeof(err)));
+  TEST_CHECK(cube.trigram_count == 2u);
+  TEST_CHECK(cube.occupied_voxels == 1u);
+  TEST_CHECK(cube.max_density == 2u);
+  TEST_CHECK(test_byte_cube_voxel(&cube, 0x41u, 0x41u, 0x41u) == 2u);
+
+  hv_free_byte_cube3d(&cube);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_byte_cube_offset_and_length(void)
+{
+  char input_template[] = "/tmp/hv_byte_cube_slice_XXXXXX";
+  const uint8_t payload[] = {0x00u, 0x41u, 0x42u, 0x43u, 0x99u};
+  HvByteCube3D cube;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_build_byte_cube3d(input_template, 1u, 1, 3u, &cube, err, sizeof(err)));
+  TEST_CHECK(cube.trigram_count == 1u);
+  TEST_CHECK(cube.occupied_voxels == 1u);
+  TEST_CHECK(test_byte_cube_voxel(&cube, 0x41u, 0x42u, 0x43u) == 1u);
+
+  hv_free_byte_cube3d(&cube);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_byte_cube_invalid_arguments(void)
+{
+  HvByteCube3D cube;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  TEST_CHECK(!hv_build_byte_cube3d(0, 0u, 0, 0u, &cube, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for byte-cube build") != 0);
+}
+
+static void test_byte_cube_respects_max_byte_cube_cap(void)
+{
+  char input_template[] = "/tmp/hv_byte_cube_cap_XXXXXX";
+  const uint8_t payload[] = {0x41u, 0x42u, 0x43u};
+  HvByteCube3D cube;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+  char *saved_cap = 0;
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+  saved_cap = test_save_env("HILBERTVIZ_MAX_BYTE_CUBE_BYTES");
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(setenv("HILBERTVIZ_MAX_BYTE_CUBE_BYTES", "67108863", 1) == 0);
+  TEST_CHECK(!hv_build_byte_cube3d(input_template, 0u, 0, 0u, &cube, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "exceeds configured cap") != 0);
+  TEST_CHECK(strstr(err, "HILBERTVIZ_MAX_BYTE_CUBE_BYTES") != 0);
+
+  test_restore_env("HILBERTVIZ_MAX_BYTE_CUBE_BYTES", saved_cap);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_byte_cube_allows_disabling_max_byte_cube_cap(void)
+{
+  char input_template[] = "/tmp/hv_byte_cube_cap_off_XXXXXX";
+  const uint8_t payload[] = {0x41u, 0x42u, 0x43u};
+  HvByteCube3D cube;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+  char *saved_cap = 0;
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+  saved_cap = test_save_env("HILBERTVIZ_MAX_BYTE_CUBE_BYTES");
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(setenv("HILBERTVIZ_MAX_BYTE_CUBE_BYTES", "0", 1) == 0);
+  TEST_CHECK(hv_build_byte_cube3d(input_template, 0u, 0, 0u, &cube, err, sizeof(err)));
+  TEST_CHECK(cube.voxels != 0);
+  TEST_CHECK(cube.side == HV_BYTE_CUBE_SIDE);
+  TEST_CHECK(cube.total_voxels == HV_BYTE_CUBE_TOTAL_VOXELS);
+  TEST_CHECK(cube.trigram_count == 1u);
+
+  hv_free_byte_cube3d(&cube);
+  test_restore_env("HILBERTVIZ_MAX_BYTE_CUBE_BYTES", saved_cap);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_byte_cube_rejects_invalid_max_byte_cube_cap_env(void)
+{
+  char input_template[] = "/tmp/hv_byte_cube_cap_env_XXXXXX";
+  const uint8_t payload[] = {0x41u, 0x42u, 0x43u};
+  HvByteCube3D cube;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+  char *saved_cap = 0;
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+  saved_cap = test_save_env("HILBERTVIZ_MAX_BYTE_CUBE_BYTES");
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(setenv("HILBERTVIZ_MAX_BYTE_CUBE_BYTES", "bogus", 1) == 0);
+  TEST_CHECK(!hv_build_byte_cube3d(input_template, 0u, 0, 0u, &cube, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid HILBERTVIZ_MAX_BYTE_CUBE_BYTES='bogus'") != 0);
+
+  test_restore_env("HILBERTVIZ_MAX_BYTE_CUBE_BYTES", saved_cap);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_byte_cube_increment_invalid_state(void)
+{
+  HvByteCube3D cube;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  TEST_CHECK(!hv_byte_cube_increment_trigram(&cube, 0x41u, 0x42u, 0x43u, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid byte-cube state") != 0);
+}
+
+static void test_byte_cube_increment_saturation(void)
+{
+  HvByteCube3D cube;
+  size_t idx = 0u;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  cube.side = HV_BYTE_CUBE_SIDE;
+  cube.total_voxels = HV_BYTE_CUBE_TOTAL_VOXELS;
+  cube.voxels = (uint32_t *)calloc((size_t)HV_BYTE_CUBE_TOTAL_VOXELS, sizeof(*cube.voxels));
+  TEST_CHECK(cube.voxels != 0);
+
+  idx = ((((size_t)0x41u * (size_t)HV_BYTE_CUBE_SIDE) + (size_t)0x42u) * (size_t)HV_BYTE_CUBE_SIDE) + (size_t)0x43u;
+  cube.voxels[idx] = UINT32_MAX;
+  cube.occupied_voxels = 1u;
+  cube.max_density = UINT32_MAX;
+  cube.max_x = 0x41u;
+  cube.max_y = 0x42u;
+  cube.max_z = 0x43u;
+
+  TEST_CHECK(hv_byte_cube_increment_trigram(&cube, 0x41u, 0x42u, 0x43u, err, sizeof(err)));
+  TEST_CHECK(cube.voxels[idx] == UINT32_MAX);
+  TEST_CHECK(cube.occupied_voxels == 1u);
+  TEST_CHECK(cube.max_density == UINT32_MAX);
+  TEST_CHECK(cube.max_x == 0x41u);
+  TEST_CHECK(cube.max_y == 0x42u);
+  TEST_CHECK(cube.max_z == 0x43u);
+
+  hv_free_byte_cube3d(&cube);
+}
+
+static void test_byte_cube_chunk_boundary_streaming(void)
+{
+  char input_template[] = "/tmp/hv_byte_cube_chunk_XXXXXX";
+  uint8_t *payload = 0;
+  size_t payload_size = 65538u;
+  HvByteCube3D cube;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  payload = (uint8_t *)calloc(payload_size, sizeof(*payload));
+  TEST_CHECK(payload != 0);
+  payload[65534u] = 0x11u;
+  payload[65535u] = 0x22u;
+  payload[65536u] = 0x33u;
+  payload[65537u] = 0x44u;
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, payload_size);
+  TEST_CHECK(wrote == (ssize_t)payload_size);
+  TEST_CHECK(close(input_fd) == 0);
+  free(payload);
+  payload = 0;
+
+  TEST_CHECK(hv_build_byte_cube3d(input_template, 0u, 0, 0u, &cube, err, sizeof(err)));
+  TEST_CHECK(cube.trigram_count == (uint64_t)(payload_size - 2u));
+  TEST_CHECK(test_byte_cube_voxel(&cube, 0x11u, 0x22u, 0x33u) == 1u);
+  TEST_CHECK(test_byte_cube_voxel(&cube, 0x22u, 0x33u, 0x44u) == 1u);
+
+  hv_free_byte_cube3d(&cube);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_byte_cube_summary_output(void)
+{
+  HvByteCube3D cube;
+  char buf[256];
+  char err[256];
+  FILE *fp = 0;
+
+  memset(&cube, 0, sizeof(cube));
+  memset(buf, 0, sizeof(buf));
+  memset(err, 0, sizeof(err));
+
+  cube.side = HV_BYTE_CUBE_SIDE;
+  cube.total_voxels = HV_BYTE_CUBE_TOTAL_VOXELS;
+  cube.trigram_count = 2u;
+  cube.occupied_voxels = 1u;
+  cube.max_density = 2u;
+  cube.max_x = 65u;
+  cube.max_y = 65u;
+  cube.max_z = 65u;
+
+  fp = tmpfile();
+  TEST_CHECK(fp != 0);
+  TEST_CHECK(hv_write_byte_cube3d_summary(fp, &cube, err, sizeof(err)));
+  TEST_CHECK(fflush(fp) == 0);
+  TEST_CHECK(fseek(fp, 0L, SEEK_SET) == 0);
+  TEST_CHECK(fread(buf, 1u, sizeof(buf) - 1u, fp) > 0u);
+  TEST_CHECK(strstr(buf, "Loaded byte cube: trigrams=2 occupied_voxels=1 side=256 total_voxels=16777216") != 0);
+  TEST_CHECK(strstr(buf, "Max voxel: 65 65 65 count=2") != 0);
+  TEST_CHECK(fclose(fp) == 0);
+}
+
+static void test_byte_cube_default_slices_empty(void)
+{
+  HvByteCube3D cube;
+  float slice_x = 0.0f;
+  float slice_y = 0.0f;
+  float slice_z = 0.0f;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+  cube.side = HV_BYTE_CUBE_SIDE;
+  cube.total_voxels = HV_BYTE_CUBE_TOTAL_VOXELS;
+
+  TEST_CHECK(hv_byte_cube_default_slices(&cube, &slice_x, &slice_y, &slice_z, err, sizeof(err)));
+  TEST_CHECK(test_abs_float(slice_x - 0.5f) < 1e-6f);
+  TEST_CHECK(test_abs_float(slice_y - 0.5f) < 1e-6f);
+  TEST_CHECK(test_abs_float(slice_z - 0.5f) < 1e-6f);
+}
+
+static void test_byte_cube_default_slices_follow_bounds(void)
+{
+  char input_template[] = "/tmp/hv_byte_cube_slices_XXXXXX";
+  const uint8_t payload[] = {0x41u, 0x42u, 0x43u, 0x44u};
+  HvByteCube3D cube;
+  float slice_x = 0.0f;
+  float slice_y = 0.0f;
+  float slice_z = 0.0f;
+  int input_fd = -1;
+  ssize_t wrote = 0;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  input_fd = mkstemp(input_template);
+  TEST_CHECK(input_fd >= 0);
+  wrote = write(input_fd, payload, sizeof(payload));
+  TEST_CHECK(wrote == (ssize_t)sizeof(payload));
+  TEST_CHECK(close(input_fd) == 0);
+
+  TEST_CHECK(hv_build_byte_cube3d(input_template, 0u, 0, 0u, &cube, err, sizeof(err)));
+  TEST_CHECK(cube.occupied_min_x == 0x41u);
+  TEST_CHECK(cube.occupied_max_x == 0x42u);
+  TEST_CHECK(cube.occupied_min_y == 0x42u);
+  TEST_CHECK(cube.occupied_max_y == 0x43u);
+  TEST_CHECK(cube.occupied_min_z == 0x43u);
+  TEST_CHECK(cube.occupied_max_z == 0x44u);
+  TEST_CHECK(hv_byte_cube_default_slices(&cube, &slice_x, &slice_y, &slice_z, err, sizeof(err)));
+  TEST_CHECK(test_abs_float(slice_x - (66.0f / 256.0f)) < 1e-6f);
+  TEST_CHECK(test_abs_float(slice_y - (67.0f / 256.0f)) < 1e-6f);
+  TEST_CHECK(test_abs_float(slice_z - (68.0f / 256.0f)) < 1e-6f);
+
+  hv_free_byte_cube3d(&cube);
+  TEST_CHECK(unlink(input_template) == 0);
+}
+
+static void test_byte_cube_default_slices_invalid_arguments(void)
+{
+  HvByteCube3D cube;
+  float slice = 0.0f;
+  char err[256];
+
+  memset(&cube, 0, sizeof(cube));
+  memset(err, 0, sizeof(err));
+
+  TEST_CHECK(!hv_byte_cube_default_slices(0, &slice, &slice, &slice, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments for byte-cube default slices") != 0);
+}
+
 static void test_3d_camera_defaults(void)
 {
   Hv3DCamera camera;
@@ -134,7 +619,7 @@ static void test_3d_camera_fit_cloud_small(void)
   TEST_CHECK(test_abs_double((double)camera.target_x - -0.5) < 1e-6);
   TEST_CHECK(test_abs_double((double)camera.target_y) < 1e-6);
   TEST_CHECK(test_abs_double((double)camera.target_z) < 1e-6);
-  TEST_CHECK(test_abs_double((double)camera.distance - 1.5) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.distance - 1.17851126) < 1e-5);
 }
 
 static void test_3d_camera_fit_cloud_large(void)
@@ -194,6 +679,50 @@ static void test_3d_camera_pitch_and_distance_clamps(void)
   camera.distance = 100.0f;
   TEST_CHECK(hv_3d_camera_clamp_distance(&camera));
   TEST_CHECK(test_abs_double((double)camera.distance - 24.0) < 1e-6);
+}
+
+static void test_3d_camera_fit_byte_cube_empty(void)
+{
+  Hv3DCamera camera;
+  HvByteCube3D cube;
+
+  memset(&camera, 0, sizeof(camera));
+  memset(&cube, 0, sizeof(cube));
+
+  hv_3d_camera_init_defaults(&camera);
+  cube.side = HV_BYTE_CUBE_SIDE;
+  cube.total_voxels = HV_BYTE_CUBE_TOTAL_VOXELS;
+
+  TEST_CHECK(hv_3d_camera_fit_byte_cube(&camera, &cube));
+  TEST_CHECK(test_abs_double((double)camera.target_x) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.target_y) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.target_z) < 1e-6);
+}
+
+static void test_3d_camera_fit_byte_cube_bounds(void)
+{
+  Hv3DCamera camera;
+  HvByteCube3D cube;
+
+  memset(&camera, 0, sizeof(camera));
+  memset(&cube, 0, sizeof(cube));
+
+  hv_3d_camera_init_defaults(&camera);
+  cube.side = HV_BYTE_CUBE_SIDE;
+  cube.total_voxels = HV_BYTE_CUBE_TOTAL_VOXELS;
+  cube.occupied_voxels = 2u;
+  cube.occupied_min_x = 0x41u;
+  cube.occupied_max_x = 0x42u;
+  cube.occupied_min_y = 0x42u;
+  cube.occupied_max_y = 0x43u;
+  cube.occupied_min_z = 0x43u;
+  cube.occupied_max_z = 0x44u;
+
+  TEST_CHECK(hv_3d_camera_fit_byte_cube(&camera, &cube));
+  TEST_CHECK(test_abs_double((double)camera.target_x - ((((66.0 / 256.0) * 2.0) - 1.0))) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.target_y - ((((67.0 / 256.0) * 2.0) - 1.0))) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.target_z - ((((68.0 / 256.0) * 2.0) - 1.0))) < 1e-6);
+  TEST_CHECK(test_abs_double((double)camera.distance - 0.9) < 1e-6);
 }
 
 static void test_3d_camera_orbit_and_zoom(void)
@@ -315,17 +844,137 @@ static void test_3d_renderer_summary_output(void)
   TEST_CHECK(fclose(fp) == 0);
 }
 
+static void test_3d_renderer_byte_cube_alpha_helper(void)
+{
+  Hv3DByteCubeViewSettings settings;
+
+  memset(&settings, 0, sizeof(settings));
+  hv_3d_byte_cube_view_settings_init_defaults(&settings);
+
+  TEST_CHECK(test_abs_float(hv_3d_byte_cube_clamp_unit(-1.0f) - 0.0f) < 1e-6f);
+  TEST_CHECK(test_abs_float(hv_3d_byte_cube_clamp_unit(2.0f) - 1.0f) < 1e-6f);
+  TEST_CHECK(test_abs_float(hv_3d_renderer_byte_cube_local_coord(0.0f) - (-1.0f)) < 1e-6f);
+  TEST_CHECK(test_abs_float(hv_3d_renderer_byte_cube_local_coord(0.5f) - 0.0f) < 1e-6f);
+  TEST_CHECK(test_abs_float(hv_3d_renderer_byte_cube_local_coord(1.0f) - 1.0f) < 1e-6f);
+  TEST_CHECK(test_abs_float(hv_3d_byte_cube_density_normalize(0u, 0u) - 0.0f) < 1e-6f);
+  TEST_CHECK(test_abs_float(hv_3d_byte_cube_density_normalize(9u, 9u) - 1.0f) < 1e-6f);
+  TEST_CHECK(
+    hv_3d_byte_cube_density_normalize(5u, 9u) >=
+    hv_3d_byte_cube_density_normalize(1u, 9u)
+  );
+  TEST_CHECK(
+    hv_3d_byte_cube_apply_brightness(0.30f, 0.20f) >
+    hv_3d_byte_cube_apply_brightness(0.30f, -0.20f)
+  );
+  TEST_CHECK(
+    hv_3d_byte_cube_apply_contrast(0.75f, 2.0f) >
+    hv_3d_byte_cube_apply_contrast(0.75f, 0.5f)
+  );
+  TEST_CHECK(test_abs_float(hv_3d_byte_cube_density_transfer(0u, 9u, 0.0f, 1.0f) - 0.0f) < 1e-6f);
+  TEST_CHECK(
+    hv_3d_byte_cube_density_transfer(1u, 9u, 0.20f, 1.0f) >
+    hv_3d_byte_cube_density_transfer(1u, 9u, -0.20f, 1.0f)
+  );
+  TEST_CHECK(hv_3d_renderer_byte_cube_alpha(0u, 9u, &settings) == 0u);
+  TEST_CHECK(hv_3d_renderer_byte_cube_alpha(9u, 9u, &settings) == 255u);
+  TEST_CHECK(
+    hv_3d_renderer_byte_cube_alpha(5u, 9u, &settings) >=
+    hv_3d_renderer_byte_cube_alpha(1u, 9u, &settings)
+  );
+}
+
+static void test_3d_byte_cube_view_settings_defaults_and_validation(void)
+{
+  Hv3DByteCubeViewSettings settings;
+  int use_free_camera = 0;
+  float pitch = 0.0f;
+  float yaw = 0.0f;
+  float r = 0.0f;
+  float g = 0.0f;
+  float b = 0.0f;
+  char err[256];
+
+  memset(&settings, 0, sizeof(settings));
+  memset(err, 0, sizeof(err));
+
+  hv_3d_byte_cube_view_settings_init_defaults(&settings);
+  TEST_CHECK(test_abs_float(settings.brightness - 0.0f) < 1e-6f);
+  TEST_CHECK(test_abs_float(settings.contrast - 1.0f) < 1e-6f);
+  TEST_CHECK(settings.palette == HV_3D_BYTE_CUBE_PALETTE_RGB);
+  TEST_CHECK(settings.blend_mode == HV_3D_BYTE_CUBE_BLEND_ACCUMULATE);
+  TEST_CHECK(settings.projection == HV_3D_BYTE_CUBE_PROJECTION_FREE_3D);
+  TEST_CHECK(settings.interpolation == HV_3D_BYTE_CUBE_INTERPOLATION_LINEAR);
+  TEST_CHECK(hv_3d_byte_cube_view_settings_validate(&settings, err, sizeof(err)));
+  TEST_CHECK(strcmp(hv_3d_byte_cube_palette_name(HV_3D_BYTE_CUBE_PALETTE_HEAT), "heat") == 0);
+  TEST_CHECK(strcmp(hv_3d_byte_cube_blend_mode_name(HV_3D_BYTE_CUBE_BLEND_ALPHA), "alpha") == 0);
+  TEST_CHECK(strcmp(hv_3d_byte_cube_projection_name(HV_3D_BYTE_CUBE_PROJECTION_XY), "xy") == 0);
+  TEST_CHECK(strcmp(hv_3d_byte_cube_interpolation_name(HV_3D_BYTE_CUBE_INTERPOLATION_NEAREST), "nearest") == 0);
+  TEST_CHECK(hv_3d_byte_cube_parse_palette("ascii", &settings.palette));
+  TEST_CHECK(settings.palette == HV_3D_BYTE_CUBE_PALETTE_ASCII);
+  TEST_CHECK(hv_3d_byte_cube_parse_blend_mode("accumulate", &settings.blend_mode));
+  TEST_CHECK(settings.blend_mode == HV_3D_BYTE_CUBE_BLEND_ACCUMULATE);
+  TEST_CHECK(hv_3d_byte_cube_parse_projection("yz", &settings.projection));
+  TEST_CHECK(settings.projection == HV_3D_BYTE_CUBE_PROJECTION_YZ);
+  TEST_CHECK(hv_3d_byte_cube_parse_interpolation("nearest", &settings.interpolation));
+  TEST_CHECK(settings.interpolation == HV_3D_BYTE_CUBE_INTERPOLATION_NEAREST);
+  TEST_CHECK(!hv_3d_byte_cube_parse_palette("bogus", &settings.palette));
+  TEST_CHECK(!hv_3d_byte_cube_parse_blend_mode("bogus", &settings.blend_mode));
+  TEST_CHECK(!hv_3d_byte_cube_parse_projection("bogus", &settings.projection));
+  TEST_CHECK(!hv_3d_byte_cube_parse_interpolation("bogus", &settings.interpolation));
+  TEST_CHECK(hv_3d_byte_cube_projection_view(HV_3D_BYTE_CUBE_PROJECTION_FREE_3D, &use_free_camera, &pitch, &yaw));
+  TEST_CHECK(use_free_camera == 1);
+  TEST_CHECK(hv_3d_byte_cube_projection_view(HV_3D_BYTE_CUBE_PROJECTION_XZ, &use_free_camera, &pitch, &yaw));
+  TEST_CHECK(use_free_camera == 0);
+  TEST_CHECK(test_abs_float(pitch - 90.0f) < 1e-6f);
+  TEST_CHECK(test_abs_float(yaw - 0.0f) < 1e-6f);
+  TEST_CHECK(!hv_3d_byte_cube_projection_view((Hv3DByteCubeProjection)99, &use_free_camera, &pitch, &yaw));
+  TEST_CHECK(!hv_3d_byte_cube_is_printable_trigram(0.0f, 1.0f, 0.0f));
+  TEST_CHECK(hv_3d_byte_cube_is_printable_trigram(0.30f, 0.35f, 0.10f));
+  TEST_CHECK(hv_3d_byte_cube_palette_color(HV_3D_BYTE_CUBE_PALETTE_RGB, 0.2f, 0.4f, 0.6f, 0.5f, &r, &g, &b));
+  TEST_CHECK((r >= 0.0f) && (r <= 1.0f));
+  TEST_CHECK((g >= 0.0f) && (g <= 1.0f));
+  TEST_CHECK((b >= 0.0f) && (b <= 1.0f));
+  TEST_CHECK(hv_3d_byte_cube_palette_color(HV_3D_BYTE_CUBE_PALETTE_HEAT, 0.2f, 0.4f, 0.6f, 0.8f, &r, &g, &b));
+  TEST_CHECK(r >= g);
+  TEST_CHECK(g >= b);
+  TEST_CHECK(hv_3d_byte_cube_palette_color(HV_3D_BYTE_CUBE_PALETTE_ASCII, 0.30f, 0.35f, 0.10f, 0.8f, &r, &g, &b));
+  TEST_CHECK(r > b);
+  TEST_CHECK(hv_3d_byte_cube_palette_color(HV_3D_BYTE_CUBE_PALETTE_MONO, 0.2f, 0.4f, 0.6f, 0.8f, &r, &g, &b));
+  TEST_CHECK(test_abs_float(r - g) < 1e-6f);
+  TEST_CHECK(test_abs_float(g - b) < 1e-6f);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_3d_byte_cube_view_settings_validate(0, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid byte-cube view settings") != 0);
+
+  settings.contrast = 0.0f;
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_3d_byte_cube_view_settings_validate(&settings, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "contrast must be positive") != 0);
+
+  hv_3d_byte_cube_view_settings_init_defaults(&settings);
+  settings.projection = (Hv3DByteCubeProjection)99;
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_3d_byte_cube_view_settings_validate(&settings, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid byte-cube projection") != 0);
+}
+
 static void test_3d_renderer_invalid_arguments(void)
 {
   Hv3DRenderer renderer;
   Hv3DCamera camera;
   HvPointCloud3D cloud;
+  HvByteCube3D cube;
+  Hv3DByteCubeViewSettings settings;
   char err[256];
 
   memset(&renderer, 0, sizeof(renderer));
   memset(&camera, 0, sizeof(camera));
   memset(&cloud, 0, sizeof(cloud));
+  memset(&cube, 0, sizeof(cube));
+  memset(&settings, 0, sizeof(settings));
   memset(err, 0, sizeof(err));
+  hv_3d_byte_cube_view_settings_init_defaults(&settings);
 
   TEST_CHECK(!hv_3d_renderer_validate_point_size(0.0f, err, sizeof(err)));
   TEST_CHECK(strstr(err, "invalid 3D point size") != 0);
@@ -336,6 +985,18 @@ static void test_3d_renderer_invalid_arguments(void)
 
   memset(err, 0, sizeof(err));
   TEST_CHECK(!hv_3d_renderer_draw(0, &camera, 640u, 480u, HV_3D_POINT_SIZE_DEFAULT, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_3d_renderer_init_byte_cube(0, 0, 0, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_3d_renderer_init_byte_cube(&renderer, &cube, &settings, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid byte-cube state") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_3d_renderer_draw_byte_cube(0, &camera, &settings, 640u, 480u, err, sizeof(err)));
   TEST_CHECK(strstr(err, "invalid arguments") != 0);
 
   memset(err, 0, sizeof(err));
@@ -351,15 +1012,24 @@ static void test_3d_renderer_invalid_arguments(void)
 static void test_3d_platform_invalid_arguments(void)
 {
   HvPointCloud3D cloud;
+  HvByteCube3D cube;
   Hv3DCamera camera;
+  Hv3DByteCubeViewSettings settings;
   char *saved_hidden = 0;
   char *saved_frames = 0;
   char err[256];
 
   memset(&cloud, 0, sizeof(cloud));
+  memset(&cube, 0, sizeof(cube));
   memset(&camera, 0, sizeof(camera));
+  memset(&settings, 0, sizeof(settings));
   memset(err, 0, sizeof(err));
+  hv_3d_byte_cube_view_settings_init_defaults(&settings);
   TEST_CHECK(!hv_3d_platform_render_static_cloud(0, 0, HV_3D_POINT_SIZE_DEFAULT, err, sizeof(err)));
+  TEST_CHECK(strstr(err, "invalid arguments") != 0);
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_3d_platform_render_static_byte_cube(0, 0, 0, err, sizeof(err)));
   TEST_CHECK(strstr(err, "invalid arguments") != 0);
 
   (void)hv_3d_platform_viewer_requested();
@@ -371,6 +1041,14 @@ static void test_3d_platform_invalid_arguments(void)
 
   memset(err, 0, sizeof(err));
   TEST_CHECK(!hv_3d_platform_render_static_cloud(&cloud, &camera, HV_3D_POINT_SIZE_DEFAULT, err, sizeof(err)));
+  if (hv_3d_platform_viewer_available()) {
+    TEST_CHECK(strstr(err, "invalid HILBERTVIZ3D_RENDER_FRAMES='bad'") != 0);
+  } else {
+    TEST_CHECK(strstr(err, "3D viewer path is not available in this build") != 0);
+  }
+
+  memset(err, 0, sizeof(err));
+  TEST_CHECK(!hv_3d_platform_render_static_byte_cube(&cube, &camera, &settings, err, sizeof(err)));
   if (hv_3d_platform_viewer_available()) {
     TEST_CHECK(strstr(err, "invalid HILBERTVIZ3D_RENDER_FRAMES='bad'") != 0);
   } else {
@@ -572,6 +1250,60 @@ static void test_hilbert3d_d2xyz_order1(void)
     TEST_CHECK(y == expected[d][1]);
     TEST_CHECK(z == expected[d][2]);
   }
+}
+
+static void test_3d_platform_byte_cube_controls(void)
+{
+  Hv3DByteCubeViewSettings settings;
+
+  memset(&settings, 0, sizeof(settings));
+  hv_3d_byte_cube_view_settings_init_defaults(&settings);
+
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_BLEND_ALPHA));
+  TEST_CHECK(settings.blend_mode == HV_3D_BYTE_CUBE_BLEND_ALPHA);
+
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_BLEND_ACCUMULATE));
+  TEST_CHECK(settings.blend_mode == HV_3D_BYTE_CUBE_BLEND_ACCUMULATE);
+
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_CYCLE_PALETTE));
+  TEST_CHECK(settings.palette == HV_3D_BYTE_CUBE_PALETTE_HEAT);
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_CYCLE_PALETTE));
+  TEST_CHECK(settings.palette == HV_3D_BYTE_CUBE_PALETTE_ASCII);
+
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_BRIGHTNESS_LOW));
+  TEST_CHECK(test_abs_float(settings.brightness - (-0.08f)) < 1e-6f);
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_BRIGHTNESS_STANDARD));
+  TEST_CHECK(test_abs_float(settings.brightness - 0.0f) < 1e-6f);
+
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_BRIGHTNESS_INCREASE));
+  TEST_CHECK(test_abs_float(settings.brightness - 0.02f) < 1e-6f);
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_BRIGHTNESS_DECREASE));
+  TEST_CHECK(test_abs_float(settings.brightness - 0.0f) < 1e-6f);
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_CONTRAST_INCREASE));
+  TEST_CHECK(test_abs_float(settings.contrast - 1.08f) < 1e-6f);
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_CONTRAST_DECREASE));
+  TEST_CHECK(test_abs_float(settings.contrast - 1.0f) < 1e-6f);
+
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_INTENSITY_NEAREST));
+  TEST_CHECK(settings.interpolation == HV_3D_BYTE_CUBE_INTERPOLATION_NEAREST);
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_INTENSITY_LINEAR));
+  TEST_CHECK(settings.interpolation == HV_3D_BYTE_CUBE_INTERPOLATION_LINEAR);
+
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_POSITION_LINEAR));
+  TEST_CHECK(settings.position_interpolation == HV_3D_BYTE_CUBE_INTERPOLATION_LINEAR);
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_POSITION_NEAREST));
+  TEST_CHECK(settings.position_interpolation == HV_3D_BYTE_CUBE_INTERPOLATION_NEAREST);
+
+  settings.brightness = 0.4f;
+  settings.contrast = 2.0f;
+  settings.palette = HV_3D_BYTE_CUBE_PALETTE_MONO;
+  TEST_CHECK(hv_3d_platform_apply_byte_cube_control(&settings, HV_3D_BYTE_CUBE_CONTROL_RESET));
+  TEST_CHECK(test_abs_float(settings.brightness - 0.0f) < 1e-6f);
+  TEST_CHECK(test_abs_float(settings.contrast - 1.0f) < 1e-6f);
+  TEST_CHECK(settings.palette == HV_3D_BYTE_CUBE_PALETTE_RGB);
+
+  TEST_CHECK(!hv_3d_platform_apply_byte_cube_control(0, HV_3D_BYTE_CUBE_CONTROL_RESET));
+  TEST_CHECK(!hv_3d_platform_apply_byte_cube_control(&settings, (Hv3DByteCubeControl)99));
 }
 
 static void test_hilbert3d_bijection_and_adjacency(void)
@@ -3412,16 +4144,39 @@ int main(void)
   test_hilbert3d_d2xyz_order1();
   test_hilbert3d_bijection_and_adjacency();
   test_3d_camera_defaults();
+  test_3d_mode_helpers();
+  test_byte_cube_empty_slice();
+  test_byte_cube_one_byte_input();
+  test_byte_cube_two_byte_input();
+  test_byte_cube_exact_trigram();
+  test_byte_cube_overlapping_trigrams();
+  test_byte_cube_offset_and_length();
+  test_byte_cube_invalid_arguments();
+  test_byte_cube_respects_max_byte_cube_cap();
+  test_byte_cube_allows_disabling_max_byte_cube_cap();
+  test_byte_cube_rejects_invalid_max_byte_cube_cap_env();
+  test_byte_cube_increment_invalid_state();
+  test_byte_cube_increment_saturation();
+  test_byte_cube_chunk_boundary_streaming();
+  test_byte_cube_summary_output();
+  test_byte_cube_default_slices_empty();
+  test_byte_cube_default_slices_follow_bounds();
+  test_byte_cube_default_slices_invalid_arguments();
   test_3d_camera_fit_cloud_small();
   test_3d_camera_fit_cloud_large();
+  test_3d_camera_fit_byte_cube_empty();
+  test_3d_camera_fit_byte_cube_bounds();
   test_3d_camera_viewport_update();
   test_3d_camera_pitch_and_distance_clamps();
   test_3d_camera_orbit_and_zoom();
   test_3d_camera_repeated_orbit_stays_finite();
   test_3d_camera_fit_then_interact_stays_valid();
   test_3d_renderer_summary_output();
+  test_3d_renderer_byte_cube_alpha_helper();
+  test_3d_byte_cube_view_settings_defaults_and_validation();
   test_3d_renderer_invalid_arguments();
   test_3d_platform_invalid_arguments();
+  test_3d_platform_byte_cube_controls();
   test_point_cloud3d_empty_slice();
   test_point_cloud3d_small_deterministic();
   test_point_cloud3d_near_capacity_slice();

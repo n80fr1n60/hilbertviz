@@ -21,8 +21,8 @@ add_test(
     ${CMAKE_COMMAND} -E env
       bash
       -lc
-      "out=\"$($<TARGET_FILE:hilbertviz3d> --help 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Supported order range: 1..8' && printf '%s' \"$out\" | grep -Fq -- '--point-size <pixels>' && printf '%s' \"$out\" | grep -Fq '${HV_3D_VIEWER_HELP_EXPECTED}'"
-)
+      "out=\"$($<TARGET_FILE:hilbertviz3d> --help 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Current default mode: hilbert.' && printf '%s' \"$out\" | grep -Fq -- '--mode <hilbert|byte-cube>' && printf '%s' \"$out\" | grep -Fq 'Supported order range: 1..8' && printf '%s' \"$out\" | grep -Fq -- '--point-size <pixels>' && printf '%s' \"$out\" | grep -Fq -- '--brightness <value>' && printf '%s' \"$out\" | grep -Fq -- '--contrast <value>' && printf '%s' \"$out\" | grep -Fq -- '--palette <rgb|heat|ascii|mono>' && printf '%s' \"$out\" | grep -Fq -- '--blend-mode <accumulate|alpha>' && printf '%s' \"$out\" | grep -Fq -- '--projection <free-3d|xy|xz|yz>' && printf '%s' \"$out\" | grep -Fq -- '--interpolation <linear|nearest>' && printf '%s' \"$out\" | grep -Fq '${HV_3D_VIEWER_HELP_EXPECTED}'"
+    )
 
 add_test(
   NAME hv_cli_3d_summary
@@ -32,6 +32,36 @@ add_test(
       bash
       -lc
       "input='${CMAKE_BINARY_DIR}/cli_3d_summary.bin'; rm -f \"$input\"; printf '\\000\\377' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --order 1 --point-size 5 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Loaded point cloud: points=2 order=1 side=2 capacity=8' && printf '%s' \"$out\" | grep -Fq 'First point: -0.500000 -0.500000 -0.500000 rgb=0,0,0' && printf '%s' \"$out\" | grep -Fq 'Last point: -0.500000 -0.500000 0.500000 rgb=255,0,0'"
+)
+
+add_test(
+  NAME hv_cli_3d_hilbert_mode_summary
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      HILBERTVIZ3D_SKIP_VIEWER=1
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_3d_hilbert_mode.bin'; rm -f \"$input\"; printf '\\000\\377' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --mode hilbert --order 1 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Loaded point cloud: points=2 order=1 side=2 capacity=8'"
+)
+
+add_test(
+  NAME hv_cli_3d_byte_cube_summary
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      HILBERTVIZ3D_SKIP_VIEWER=1
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_3d_byte_cube.bin'; rm -f \"$input\"; printf 'ABCD' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --mode byte-cube 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Loaded byte cube: trigrams=2 occupied_voxels=2 side=256 total_voxels=16777216' && printf '%s' \"$out\" | grep -Fq 'Max voxel: 65 66 67 count=1'"
+)
+
+add_test(
+  NAME hv_cli_3d_byte_cube_settings_summary
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      HILBERTVIZ3D_SKIP_VIEWER=1
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_3d_byte_cube_settings.bin'; rm -f \"$input\"; printf 'ABCD' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --mode byte-cube --brightness 0.25 --contrast 1.5 --palette heat --blend-mode alpha --projection xy --interpolation nearest 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -eq 0 ] && printf '%s' \"$out\" | grep -Fq 'Loaded byte cube: trigrams=2 occupied_voxels=2 side=256 total_voxels=16777216'"
 )
 
 add_test(
@@ -51,6 +81,96 @@ add_test(
       bash
       -lc
       "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --order 1 --point-size 0 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid point size '0'\""
+)
+
+add_test(
+  NAME hv_cli_3d_reject_invalid_mode
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --mode nope --order 1 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid 3D mode 'nope'\""
+)
+
+add_test(
+  NAME hv_cli_3d_reject_invalid_brightness
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --mode byte-cube --brightness nope 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid brightness 'nope'\""
+)
+
+add_test(
+  NAME hv_cli_3d_reject_invalid_contrast
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --mode byte-cube --contrast nope 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid contrast 'nope'\""
+)
+
+add_test(
+  NAME hv_cli_3d_reject_invalid_palette
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --mode byte-cube --palette nope 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid byte-cube palette 'nope'\""
+)
+
+add_test(
+  NAME hv_cli_3d_reject_invalid_blend_mode
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --mode byte-cube --blend-mode nope 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid byte-cube blend mode 'nope'\""
+)
+
+add_test(
+  NAME hv_cli_3d_reject_invalid_projection
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --mode byte-cube --projection nope 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid byte-cube projection 'nope'\""
+)
+
+add_test(
+  NAME hv_cli_3d_reject_invalid_interpolation
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --mode byte-cube --interpolation nope 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq \"Invalid byte-cube interpolation 'nope'\""
+)
+
+add_test(
+  NAME hv_cli_3d_byte_cube_placeholder
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --mode byte-cube --order 1 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq -- '--order is only supported with --mode hilbert'"
+)
+
+add_test(
+  NAME hv_cli_3d_reject_brightness_without_byte_cube
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --order 1 --brightness 0.1 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq -- '--brightness is only supported with --mode byte-cube'"
+)
+
+add_test(
+  NAME hv_cli_3d_reject_interpolation_without_byte_cube
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      bash
+      -lc
+      "out=\"$($<TARGET_FILE:hilbertviz3d> ${PROJECT_SOURCE_DIR}/README.md --order 1 --interpolation nearest 2>&1)\"; rc=$?; echo \"$out\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq -- '--interpolation is only supported with --mode byte-cube'"
 )
 
 add_test(
@@ -116,6 +236,16 @@ add_test(
       bash
       -lc
       "input='${CMAKE_BINARY_DIR}/cli_3d_cap.bin'; rm -f \"$input\"; printf '\\000' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --order 8 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq 'exceeds configured cap' && printf '%s' \"$out\" | grep -Fq 'HILBERTVIZ_MAX_POINT_CLOUD_BYTES'"
+)
+
+add_test(
+  NAME hv_cli_3d_reject_byte_cube_cap
+  COMMAND
+    ${CMAKE_COMMAND} -E env
+      HILBERTVIZ_MAX_BYTE_CUBE_BYTES=67108863
+      bash
+      -lc
+      "input='${CMAKE_BINARY_DIR}/cli_3d_byte_cube_cap.bin'; rm -f \"$input\"; printf 'ABC' > \"$input\"; out=\"$($<TARGET_FILE:hilbertviz3d> \"$input\" --mode byte-cube 2>&1)\"; rc=$?; echo \"$out\"; rm -f \"$input\"; [ \"$rc\" -ne 0 ] && printf '%s' \"$out\" | grep -Fq 'exceeds configured cap' && printf '%s' \"$out\" | grep -Fq 'HILBERTVIZ_MAX_BYTE_CUBE_BYTES'"
 )
 
 add_test(
